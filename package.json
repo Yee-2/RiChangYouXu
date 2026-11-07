@@ -10,15 +10,16 @@
   },
   "dependencies": {
     "@fontsource-variable/material-symbols-rounded": "^5.3.9",
+    "@supabase/supabase-js": "^2.57.4",
     "idb": "^8.0.3",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "@supabase/supabase-js": "^2.57.4"
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
+    "supabase": "^3.0.0",
     "typescript": "~5.9.2",
     "vite": "^7.1.7",
     "vite-plugin-pwa": "^1.0.3"
