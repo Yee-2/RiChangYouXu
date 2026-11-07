@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import * as db from './db';
-import Community, { AccountSettings } from './community';
+import Community, { AccountSettings, AuthPage, type Profile as CommunityProfile } from './community';
 import { supabase } from './supabase';
 import { Icon } from './Icon';
 import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, Meter, MeterReading, NavKey, Pet, PetEvent, PetEventKind, StoreName, ThemeChoice } from './types';
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
+type ProfileView = 'home' | 'auth' | 'account';
 const emptyData: DataState = { checklists: [], checklistItems: [], checkTemplates: [], checkRuns: [], meters: [], meterReadings: [], pets: [], petEvents: [], preferences: [] };
 const id = () => crypto.randomUUID();
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
@@ -29,6 +30,7 @@ export default function App() {
   const [data, setData] = useState<DataState>(emptyData);
   const [ready, setReady] = useState(false);
   const [nav, setNav] = useState<NavKey>('home');
+  const [profileView, setProfileView] = useState<ProfileView>('home');
   const [theme, setTheme] = useState<ThemeChoice>('system');
   const [modal, setModal] = useState<string | null>(null);
   const [selectedChecklist, setSelectedChecklist] = useState<string | null>(null);
@@ -252,7 +254,7 @@ export default function App() {
       {nav === 'lists' && <ListsPage lists={data.checklists} listItems={data.checklistItems} templates={data.checkTemplates} runs={data.checkRuns} selected={selectedChecklist} setSelected={setSelectedChecklist} onNewList={() => setModal('checklist')} onNewItem={(listId) => { setSelectedChecklist(listId); setModal('item'); }} onToggleItem={toggleItem} onNewTemplate={() => setModal('template')} onStartRun={startRun} onToggleRun={toggleRunItem} onExample={createExampleChecklist} onRename={renameChecklist} onArchive={toggleChecklistArchive} onDelete={deleteChecklist} onEditTemplate={editTemplate} onCopyTemplate={copyTemplate} onDeleteTemplate={deleteTemplate} />}
       {nav === 'records' && <RecordsPage tab={recordTab} setTab={setRecordTab} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={data.petEvents} onAddMeter={() => setModal('meter')} onAddReading={() => setModal('reading')} onAddPet={() => setModal('pet')} onAddPetEvent={() => setModal('pet-event')} onToggleEvent={markPetEvent} />}
       {nav === 'community' && <Community session={session} />}
-      {nav === 'profile' && <ProfilePage session={session} onMessage={setToast} onGoCommunity={() => setNav('community')} onTheme={handleTheme} onExport={exportBackup} onImport={() => setModal('import')} onClear={clearData} />}
+      {nav === 'profile' && <ProfilePage session={session} view={profileView} setView={setProfileView} onMessage={setToast} onTheme={handleTheme} onExport={exportBackup} onImport={() => setModal('import')} onClear={clearData} />}
     </main>
     <nav className="bottom-nav" aria-label="主导航">
       {navItems.map((item) => <button key={item.key} className={`nav-button ${nav === item.key ? 'active' : ''}`} onClick={() => setNav(item.key)} aria-current={nav === item.key ? 'page' : undefined}>
@@ -316,9 +318,34 @@ function RecordsPage({ tab, setTab, meters, readings, pets, events, onAddMeter, 
   </>;
 }
 
-function ProfilePage({ session, onMessage, onGoCommunity, onTheme, onExport, onImport, onClear }: { session: Session | null; onMessage: (message: string) => void; onGoCommunity: () => void; onTheme: () => Promise<void>; onExport: () => void; onImport: () => void; onClear: () => void }) {
+function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onImport, onClear }: { session: Session | null; view: ProfileView; setView: (view: ProfileView) => void; onMessage: (message: string) => void; onTheme: () => Promise<void>; onExport: () => void; onImport: () => void; onClear: () => void }) {
+  const [accountProfile, setAccountProfile] = useState<CommunityProfile | null>(null);
   const effective = document.documentElement.dataset.theme === 'dark' ? '夜间' : '日间';
-  return <><PageTitle eyebrow="只属于你的生活空间" title="我的" /><section className="profile-card"><div className="profile-avatar"><Icon name="face_3" size={32} /></div><div><h2>生活整理者</h2><p>生活记录保存在本机</p></div><span className="local-chip"><Icon name="offline_bolt" size={16} />本机数据</span></section>{session ? <AccountSettings session={session} onMessage={onMessage} /> : <section className="settings-group profile-community-prompt"><h2>社区账号</h2><p>登录后查看社区动态、参与话题并管理个人资料。</p><button className="soft-button" onClick={onGoCommunity}><Icon name="forum" />前往社区登录</button></section>}<section className="settings-group"><h2>偏好设置</h2><button className="settings-row" onClick={() => void onTheme()}><span className="settings-icon"><Icon name={effective === '夜间' ? 'dark_mode' : 'light_mode'} /></span><span><b>外观主题</b><small>{effective} · 点击切换</small></span><Icon name="chevron_right" /></button><div className="settings-row static"><span className="settings-icon blue"><Icon name="cloud_off" /></span><span><b>数据保存</b><small>清单、抄表和宠物记录保存在本机</small></span></div></section><section className="settings-group"><h2>数据与备份</h2><button className="settings-row" onClick={onExport}><span className="settings-icon green"><Icon name="download" /></span><span><b>导出备份</b><small>保存一份 JSON 文件到设备</small></span><Icon name="chevron_right" /></button><button className="settings-row" onClick={onImport}><span className="settings-icon amber"><Icon name="upload_file" /></span><span><b>导入备份</b><small>合并恢复之前导出的数据</small></span><Icon name="chevron_right" /></button><button className="settings-row danger-row" onClick={onClear}><span className="settings-icon red"><Icon name="delete" /></span><span><b>清除本机记录</b><small>删除全部清单、表具和宠物记录</small></span><Icon name="chevron_right" /></button></section><section className="settings-group"><h2>关于</h2><div className="settings-row static"><span className="settings-icon"><Icon name="info" /></span><span><b>日常有序</b><small>本机生活管理 · 生活社区</small></span><span className="version-chip">v0.1</span></div></section></>;
+
+  useEffect(() => {
+    if (!session || !supabase) { setAccountProfile(null); return; }
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status').eq('id', session.user.id).maybeSingle();
+      if (error) { if (active) onMessage(error.message); return; }
+      const value = data as CommunityProfile | null;
+      if (value?.avatar_path) {
+        const { data: signed } = await supabase.storage.from('community-media').createSignedUrl(value.avatar_path, 3600);
+        value.avatar_url = signed?.signedUrl;
+      }
+      if (active) setAccountProfile(value);
+    })();
+    return () => { active = false; };
+  }, [session?.user.id, onMessage]);
+
+  useEffect(() => {
+    if ((view === 'auth' && session) || (view === 'account' && !session)) setView('home');
+  }, [view, session, setView]);
+
+  if (view === 'auth') return <div className="profile-subpage"><AuthPage onBack={() => setView('home')} /></div>;
+  if (view === 'account' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('home')}><Icon name="arrow_back" />返回我的</button><PageTitle eyebrow="ACCOUNT SETTINGS" title="账号设置" /><AccountSettings session={session} onMessage={onMessage} onProfileChange={setAccountProfile} /></div>;
+
+  return <><PageTitle eyebrow="只属于你的生活空间" title="我的" /><button className="profile-account-entry" type="button" onClick={() => setView(session ? 'account' : 'auth')} aria-label={session ? `账号设置：${accountProfile?.display_name ?? '账号用户'}` : '登录或注册'}><span className="profile-account-avatar">{session && (accountProfile?.avatar_url ? <img src={accountProfile.avatar_url} alt="" /> : <Icon name="person" size={29} />)}</span><span className="profile-account-name">{session ? accountProfile?.display_name || '账号用户' : '登录/注册'}</span></button><section className="settings-group"><h2>偏好设置</h2><button className="settings-row" onClick={() => void onTheme()}><span className="settings-icon"><Icon name={effective === '夜间' ? 'dark_mode' : 'light_mode'} /></span><span><b>外观主题</b><small>{effective} · 点击切换</small></span><Icon name="chevron_right" /></button><div className="settings-row static"><span className="settings-icon blue"><Icon name="cloud_off" /></span><span><b>数据保存</b><small>清单、抄表和宠物记录保存在本机</small></span></div></section><section className="settings-group"><h2>数据与备份</h2><button className="settings-row" onClick={onExport}><span className="settings-icon green"><Icon name="download" /></span><span><b>导出备份</b><small>保存一份 JSON 文件到设备</small></span><Icon name="chevron_right" /></button><button className="settings-row" onClick={onImport}><span className="settings-icon amber"><Icon name="upload_file" /></span><span><b>导入备份</b><small>合并恢复之前导出的数据</small></span><Icon name="chevron_right" /></button><button className="settings-row danger-row" onClick={onClear}><span className="settings-icon red"><Icon name="delete" /></span><span><b>清除本机记录</b><small>删除全部清单、表具和宠物记录</small></span><Icon name="chevron_right" /></button></section><section className="settings-group"><h2>关于</h2><div className="settings-row static"><span className="settings-icon"><Icon name="info" /></span><span><b>日常有序</b><small>本机生活管理 · 生活社区</small></span><span className="version-chip">v0.1</span></div></section></>;
 }
 
 function PageTitle({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) { return <div className="page-title-row"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div>{action}</div>; }

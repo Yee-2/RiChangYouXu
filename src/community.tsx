@@ -88,7 +88,7 @@ export default function Community({ session }: { session: Session | null }) {
 
   if (!communityConfigured || !supabase) return <section className="community-cover"><div className="community-spark"><Icon name="forum" /></div><p className="eyebrow">COMMUNITY</p><h1>把生活里的小事<br /><span>分享给同频的人</span></h1><p className="muted">登录后查看社区动态、参与话题，也可以发布图文和评论。</p><div className="community-preview"><span># 宠物日记</span><span># 今天的小确幸</span><span># 生活灵感</span></div><p className="muted">社区服务暂未配置，请稍后再来。</p></section>;
 
-  if (!session && showAuthPage) return <div className="community-auth-page"><button className="soft-button auth-back" type="button" onClick={() => setShowAuthPage(false)}><Icon name="arrow_back" />返回社区介绍</button><AuthCard /></div>;
+  if (!session && showAuthPage) return <AuthPage onBack={() => setShowAuthPage(false)} />;
   if (!session) return <CommunityWelcome onLogin={() => setShowAuthPage(true)} />;
 
   if (adminOpen && profile?.role === 'admin') return <AdminPanel onBack={() => setAdminOpen(false)} />;
@@ -125,7 +125,11 @@ function AuthCard() {
     finally { setBusy(false); }
   };
   const resend = async () => { if (!supabase || !pendingEmail) return; const { error } = await supabase.auth.resend({ type: 'signup', email: pendingEmail }); setError(error?.message ?? ''); if (!error) setMessage('验证邮件已重新发送。'); };
-  return <section className="auth-card"><div><p className="eyebrow">加入生活社区</p><h2>{mode === 'login' ? '登录后参与互动' : mode === 'signup' ? '创建邮箱账号' : '找回密码'}</h2><p>注册使用邮箱和密码，不需要手机号。</p></div><form className="auth-form" onSubmit={submit}><input name="email" type="email" autoComplete="email" placeholder="邮箱地址" required />{mode !== 'reset' && <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} placeholder="密码（至少 8 位）" required />}{error && <p className="form-error">{error}</p>}{message && <p className="form-success">{message}</p>}{pendingEmail && mode === 'signup' && <button type="button" className="text-button" onClick={() => void resend()}>重新发送验证邮件</button>}<button className="primary-button" disabled={busy}>{busy ? '请稍候…' : mode === 'signup' ? '注册并验证邮箱' : mode === 'reset' ? '发送重置邮件' : '邮箱登录'}</button><div className="auth-switch">{mode !== 'login' && <button type="button" onClick={() => { setMode('login'); setError(''); setMessage(''); }}>返回登录</button>}{mode === 'login' && <><button type="button" onClick={() => setMode('signup')}>创建账号</button><button type="button" onClick={() => setMode('reset')}>忘记密码</button></>}</div></form></section>;
+  return <section className="auth-card"><div><p className="eyebrow">日常有序账号</p><h2>{mode === 'login' ? '登录后继续' : mode === 'signup' ? '创建邮箱账号' : '找回密码'}</h2><p>使用邮箱和密码登录或注册，不需要手机号。</p></div><form className="auth-form" onSubmit={submit}><input name="email" type="email" autoComplete="email" placeholder="邮箱地址" required />{mode !== 'reset' && <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} placeholder="密码（至少 8 位）" required />}{error && <p className="form-error">{error}</p>}{message && <p className="form-success">{message}</p>}{pendingEmail && mode === 'signup' && <button type="button" className="text-button" onClick={() => void resend()}>重新发送验证邮件</button>}<button className="primary-button" disabled={busy}>{busy ? '请稍候…' : mode === 'signup' ? '注册并验证邮箱' : mode === 'reset' ? '发送重置邮件' : '邮箱登录'}</button><div className="auth-switch">{mode !== 'login' && <button type="button" onClick={() => { setMode('login'); setError(''); setMessage(''); }}>返回登录</button>}{mode === 'login' && <><button type="button" onClick={() => setMode('signup')}>创建账号</button><button type="button" onClick={() => setMode('reset')}>忘记密码</button></>}</div></form></section>;
+}
+
+export function AuthPage({ onBack }: { onBack: () => void }) {
+  return <div className="community-auth-page"><button className="soft-button auth-back" type="button" onClick={onBack}><Icon name="arrow_back" />返回</button><AuthCard /></div>;
 }
 
 function CommunityWelcome({ onLogin }: { onLogin: () => void }) {
@@ -143,7 +147,7 @@ function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
   return <details className="emoji-picker"><summary><Icon name="mood" size={17} />表情</summary><div className="emoji-picker-popover" aria-label="表情选项">{communityEmojis.map((emoji, index) => <button type="button" key={`${emoji}-${index}`} aria-label={`插入${emoji}`} onClick={() => onSelect(emoji)}>{emoji}</button>)}</div></details>;
 }
 
-export function AccountSettings({ session, onMessage }: { session: Session; onMessage: (message: string) => void }) {
+export function AccountSettings({ session, onMessage, onProfileChange }: { session: Session; onMessage: (message: string) => void; onProfileChange: (profile: Profile | null) => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const loadProfile = useCallback(async () => {
     if (!supabase) return;
@@ -156,9 +160,10 @@ export function AccountSettings({ session, onMessage }: { session: Session; onMe
       value.avatar_url = signed?.signedUrl;
     }
     setProfile(value);
-  }, [session.user.id, onMessage]);
+    onProfileChange(value);
+  }, [session.user.id, onMessage, onProfileChange]);
   useEffect(() => { void loadProfile(); }, [loadProfile]);
-  return <section className="account-settings"><div className="account-settings-heading"><div><p className="eyebrow">COMMUNITY ACCOUNT</p><h2>社区账号</h2><p>在这里管理头像、昵称、密码和账号安全。</p></div><span className="account-status-chip">{profile?.account_status === 'suspended' ? '账号已暂停' : '账号正常'}</span></div><AccountBar session={session} profile={profile} onProfileChange={() => void loadProfile()} onMessage={onMessage} /></section>;
+  return <section className="account-settings"><div className="account-settings-heading"><div><p className="eyebrow">COMMUNITY ACCOUNT</p><h2>个人资料</h2><p>更换头像、昵称或简介，并管理账号安全。</p></div><span className="account-status-chip">{profile?.account_status === 'suspended' ? '账号已暂停' : '账号正常'}</span></div><AccountBar session={session} profile={profile} onProfileChange={() => void loadProfile()} onMessage={onMessage} /></section>;
 }
 
 function AccountBar({ session, profile, onProfileChange, onMessage }: { session: Session; profile: Profile | null; onProfileChange: () => void; onMessage: (message: string) => void }) {
