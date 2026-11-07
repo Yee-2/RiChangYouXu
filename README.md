@@ -15,7 +15,7 @@ npm run dev
 
 ## 启用社区
 
-1. 创建 Supabase 项目，并在 SQL Editor 执行 `supabase/migrations/202611080001_initial_community.sql`。
+1. 创建 Supabase 项目，并在 SQL Editor 依次执行 `supabase/migrations/202611080001_initial_community.sql` 与 `supabase/migrations/202611080002_profile_avatar_policy.sql`。
 2. 复制 `.env.example` 为 `.env.local`，填入 Project URL 和 anon/publishable key。
 3. 部署 Edge Functions：`admin-moderate` 与 `delete-account`。Supabase CLI 登录并关联项目后运行 `supabase functions deploy admin-moderate` 与 `supabase functions deploy delete-account`。
 4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs。
