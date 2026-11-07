@@ -9,9 +9,9 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@fontsource-variable/material-symbols-rounded": "^5.3.9",
     "@supabase/supabase-js": "^2.57.4",
     "idb": "^8.0.3",
+    "lucide-react": "^1.70.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

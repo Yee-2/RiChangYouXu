@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import * as db from './db';
 import Community from './community';
 import { supabase } from './supabase';
+import { Icon } from './Icon';
 import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, Meter, MeterReading, NavKey, Pet, PetEvent, PetEventKind, StoreName, ThemeChoice } from './types';
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
@@ -10,10 +11,6 @@ const emptyData: DataState = { checklists: [], checklistItems: [], checkTemplate
 const id = () => crypto.randomUUID();
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
 const iconNames: Record<NavKey, string> = { home: 'home', lists: 'checklist', records: 'monitoring', community: 'forum', profile: 'person' };
-
-function Icon({ name, size = 22 }: { name: string; size?: number }) {
-  return <span className="material-symbols-rounded icon" aria-hidden="true" style={{ fontSize: size }}>{name}</span>;
-}
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -243,7 +240,7 @@ export default function App() {
     { key: 'home', label: '首页' }, { key: 'lists', label: '清单' }, { key: 'records', label: '记录' }, { key: 'community', label: '社区' }, { key: 'profile', label: '我的' }
   ];
 
-  if (!ready) return <div className="loading"><span className="material-symbols-rounded spin">progress_activity</span><p>正在准备你的生活空间…</p></div>;
+  if (!ready) return <div className="loading"><Icon name="progress_activity" className="spin" /><p>正在准备你的生活空间…</p></div>;
 
   return <div className="app-shell">
     <header className="topbar">
@@ -280,7 +277,7 @@ function HomePage({ items, runs, templates, meters, readings, pets, events, onGo
   const reading = readings.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
   return <>
     <section className="welcome-row"><div><p className="eyebrow">慢一点，也能安排好</p><h1>早上好，<span>今天想先做哪件小事？</span></h1></div><div className="sun-badge"><Icon name="wb_sunny" size={24} /></div></section>
-    <section className="hero-card"><div className="hero-content"><span className="eyebrow light-text">TODAY · {todayItems.length} 项待办</span><h2>先从一件小事开始</h2><p>完成 {Math.max(0, dataCompleted(items))} 项，给今天留一点从容。</p><div className="hero-progress"><i style={{ width: `${items.length ? Math.round((dataCompleted(items) / (items.length + dataCompleted(items))) * 100) : 0}%` }} /></div></div><div className="hero-art"><span className="material-symbols-rounded">auto_awesome</span></div></section>
+    <section className="hero-card"><div className="hero-content"><span className="eyebrow light-text">TODAY · {todayItems.length} 项待办</span><h2>先从一件小事开始</h2><p>完成 {Math.max(0, dataCompleted(items))} 项，给今天留一点从容。</p><div className="hero-progress"><i style={{ width: `${items.length ? Math.round((dataCompleted(items) / (items.length + dataCompleted(items))) * 100) : 0}%` }} /></div></div><div className="hero-art"><Icon name="auto_awesome" size={70} /></div></section>
     <section className="home-section"><div className="section-heading"><div><p className="eyebrow">先看这一些</p><h2>今天要记得</h2></div><button className="text-button" onClick={() => onGo('lists')}>全部清单 <Icon name="arrow_forward" size={17} /></button></div>
       {todayItems.length === 0 ? <div className="inline-empty"><Icon name="task_alt" size={22} /><span>今天没有待办，享受一点空白时间吧。</span></div> : todayItems.slice(0, 4).map((item, index) => <div className="home-task" key={item.id}><span className={`task-icon tint-${index % 3}`}><Icon name={index === 0 ? 'pets' : index === 1 ? 'water_drop' : 'checklist'} /></span><div className="task-label"><b>{item.title}</b><small>{item.dueDate || '生活清单'}</small></div><Icon name="chevron_right" size={20} /></div>)}
     </section>
