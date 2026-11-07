@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { communityConfigured, supabase } from './supabase';
 import { Icon } from './Icon';
 
-type Profile = { id: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'deleted' };
+export type Profile = { id: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'deleted' };
 type Topic = { id: string; slug: string; title: string };
 type Post = { id: string; author_id: string; body: string; image_paths: string[]; created_at: string; profile?: Profile; topics?: Topic[]; liked?: boolean; followed?: boolean; likes?: number; comments?: CommentItem[]; images?: string[] };
 type CommentItem = { id: string; post_id: string; author_id: string; body: string; image_paths: string[]; created_at: string; profile?: Profile; images?: string[] };
@@ -15,8 +15,8 @@ export default function Community({ session }: { session: Session | null }) {
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [adminOpen, setAdminOpen] = useState(false);
+  const [showAuthPage, setShowAuthPage] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!supabase || !session?.user) { setProfile(null); return; }
@@ -86,13 +86,14 @@ export default function Community({ session }: { session: Session | null }) {
   useEffect(() => { void loadProfile(); }, [loadProfile]);
   useEffect(() => { void loadPosts(); }, [loadPosts]);
 
-  if (!communityConfigured || !supabase) return <section className="community-cover"><div className="community-spark"><Icon name="forum" /></div><p className="eyebrow">COMMUNITY SETUP</p><h1>你的生活社区<br /><span>即将上线</span></h1><p className="muted">社区代码已准备好。配置 Supabase 项目后即可启用邮箱账号、图文动态、话题和互动。</p><div className="community-preview"><span># 宠物日记</span><span># 今天的小确幸</span><span># 生活灵感</span></div><p className="muted">配置步骤见项目根目录的 `.env.example` 和产品指南。</p></section>;
+  if (!communityConfigured || !supabase) return <section className="community-cover"><div className="community-spark"><Icon name="forum" /></div><p className="eyebrow">COMMUNITY</p><h1>把生活里的小事<br /><span>分享给同频的人</span></h1><p className="muted">登录后查看社区动态、参与话题，也可以发布图文和评论。</p><div className="community-preview"><span># 宠物日记</span><span># 今天的小确幸</span><span># 生活灵感</span></div><p className="muted">社区服务暂未配置，请稍后再来。</p></section>;
+
+  if (!session && showAuthPage) return <div className="community-auth-page"><button className="soft-button auth-back" type="button" onClick={() => setShowAuthPage(false)}><Icon name="arrow_back" />返回社区介绍</button><AuthCard /></div>;
+  if (!session) return <CommunityWelcome onLogin={() => setShowAuthPage(true)} />;
 
   if (adminOpen && profile?.role === 'admin') return <AdminPanel onBack={() => setAdminOpen(false)} />;
   return <div className="community-page">
     <div className="community-title"><div><p className="eyebrow">SHARE A LITTLE JOY</p><h1>生活社区</h1><p>记录生活的小事，也看看别人的可爱日常。</p></div>{profile?.role === 'admin' && <button className="soft-button" onClick={() => setAdminOpen(true)}><Icon name="admin_panel_settings" />管理后台</button>}</div>
-    {!session ? <AuthCard /> : <AccountBar session={session} profile={profile} onProfileChange={loadProfile} onMessage={setNotice} />}
-    {notice && <div className="community-notice">{notice}</div>}
     {session && profile?.account_status !== 'active' && profile && <div className="community-alert">账号当前状态：{profile.account_status === 'suspended' ? '暂时停用' : '已注销'}。社区发布和互动已关闭。</div>}
     <div className="community-feed-layout"><aside className="topic-rail"><h3>热门话题</h3><p className={!selectedTopic ? 'topic-link selected' : 'topic-link'} onClick={() => setSelectedTopic(null)}>全部动态</p>{['宠物日记','生活碎片','今日好心情','养宠新手','居家日常'].map((title) => <TopicShortcut key={title} title={title} active={selectedTopic?.title === title} onClick={(topic) => setSelectedTopic(topic)} />)}<div className="small-note">动态支持图片、表情、话题和评论。</div></aside><div className="feed-main">
       {session && profile?.account_status === 'active' && <Composer userId={session.user.id} onPosted={loadPosts} onError={setError} />}
@@ -125,6 +126,39 @@ function AuthCard() {
   };
   const resend = async () => { if (!supabase || !pendingEmail) return; const { error } = await supabase.auth.resend({ type: 'signup', email: pendingEmail }); setError(error?.message ?? ''); if (!error) setMessage('验证邮件已重新发送。'); };
   return <section className="auth-card"><div><p className="eyebrow">加入生活社区</p><h2>{mode === 'login' ? '登录后参与互动' : mode === 'signup' ? '创建邮箱账号' : '找回密码'}</h2><p>注册使用邮箱和密码，不需要手机号。</p></div><form className="auth-form" onSubmit={submit}><input name="email" type="email" autoComplete="email" placeholder="邮箱地址" required />{mode !== 'reset' && <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} placeholder="密码（至少 8 位）" required />}{error && <p className="form-error">{error}</p>}{message && <p className="form-success">{message}</p>}{pendingEmail && mode === 'signup' && <button type="button" className="text-button" onClick={() => void resend()}>重新发送验证邮件</button>}<button className="primary-button" disabled={busy}>{busy ? '请稍候…' : mode === 'signup' ? '注册并验证邮箱' : mode === 'reset' ? '发送重置邮件' : '邮箱登录'}</button><div className="auth-switch">{mode !== 'login' && <button type="button" onClick={() => { setMode('login'); setError(''); setMessage(''); }}>返回登录</button>}{mode === 'login' && <><button type="button" onClick={() => setMode('signup')}>创建账号</button><button type="button" onClick={() => setMode('reset')}>忘记密码</button></>}</div></form></section>;
+}
+
+function CommunityWelcome({ onLogin }: { onLogin: () => void }) {
+  return <section className="community-welcome"><div className="community-welcome-art"><span className="welcome-orbit orbit-one" /><span className="welcome-orbit orbit-two" /><span className="welcome-sticker sticker-heart">♡</span><span className="welcome-sticker sticker-sparkle">✦</span><div className="welcome-forum-icon"><Icon name="forum" size={34} /></div></div><p className="eyebrow">A LITTLE SPACE FOR EVERYDAY</p><h1>生活里的小事，<br /><span>值得被看见。</span></h1><p className="welcome-description">登录后查看社区动态、参与 #宠物日记 等话题，分享照片、表情和日常，也能认识喜欢同一种生活的人。</p><button className="primary-button welcome-login" onClick={onLogin}><Icon name="login" />登录后查看社区</button><div className="welcome-footnote"><Icon name="password" size={15} />邮箱账号登录，社区内容仅对登录用户开放</div></section>;
+}
+
+const communityEmojis = [
+  '😀','😃','😄','😁','😆','😅','😂','🤣','🥹','😊','😇','🙂','🙃','😉','😍','🥰','😘','😋','😜','🤪','🤗','🤔','🫡','🤭','🫣','🥳','😎','😭','🥺','😴','😮‍💨','🤩',
+  '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🩷','💖','💗','💓','💕','💞','💘','💝','💟','❣️','💔','❤️‍🔥','❤️‍🩹','💋','💌',
+  '👋','👏','🙌','🫶','👍','👎','🤝','🙏','💪','✌️','🤞','🫰','🤟','👌','👐','💅','🧸','🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐻‍❄️','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦄','🐝','🦋','🐢','🐬','🐳','🐾',
+  '🌸','🌷','🌹','🌻','🌼','🍀','🌿','🌱','🌈','☀️','🌙','⭐','✨','⚡','🔥','☕','🍵','🍰','🍓','🍑','🍊','🍋','🍉','🍇','🍒','🥑','🍜','🍣','🍕','🎂','🎉','🎁','🎈','🎵','📸','🏡','🧡'
+];
+
+function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
+  return <details className="emoji-picker"><summary><Icon name="mood" size={17} />表情</summary><div className="emoji-picker-popover" aria-label="表情选项">{communityEmojis.map((emoji, index) => <button type="button" key={`${emoji}-${index}`} aria-label={`插入${emoji}`} onClick={() => onSelect(emoji)}>{emoji}</button>)}</div></details>;
+}
+
+export function AccountSettings({ session, onMessage }: { session: Session; onMessage: (message: string) => void }) {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const loadProfile = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status').eq('id', session.user.id).maybeSingle();
+    if (error) { onMessage(error.message); return; }
+    const value = data as Profile | null;
+    if (value?.avatar_path) {
+      const { data: signed, error: avatarError } = await supabase.storage.from('community-media').createSignedUrl(value.avatar_path, 3600);
+      if (avatarError) onMessage(avatarError.message);
+      value.avatar_url = signed?.signedUrl;
+    }
+    setProfile(value);
+  }, [session.user.id, onMessage]);
+  useEffect(() => { void loadProfile(); }, [loadProfile]);
+  return <section className="account-settings"><div className="account-settings-heading"><div><p className="eyebrow">COMMUNITY ACCOUNT</p><h2>社区账号</h2><p>在这里管理头像、昵称、密码和账号安全。</p></div><span className="account-status-chip">{profile?.account_status === 'suspended' ? '账号已暂停' : '账号正常'}</span></div><AccountBar session={session} profile={profile} onProfileChange={() => void loadProfile()} onMessage={onMessage} /></section>;
 }
 
 function AccountBar({ session, profile, onProfileChange, onMessage }: { session: Session; profile: Profile | null; onProfileChange: () => void; onMessage: (message: string) => void }) {
@@ -197,7 +231,7 @@ function Composer({ userId, onPosted, onError }: { userId: string; onPosted: () 
     finally { setBusy(false); }
   };
   const addEmoji = (emoji: string) => setBody((previous) => `${previous}${emoji}`);
-  return <form className="composer" onSubmit={submit}><div className="composer-heading"><span className="composer-avatar"><Icon name="edit_note" /></span><div><b>分享一点今天的生活</b><small>可以添加话题，例如 #宠物日记</small></div></div><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={4} maxLength={5000} placeholder="此刻有什么想记录的？" />{preview.length > 0 && <div className="image-previews">{preview.map((url) => <img src={url} key={url} alt="待上传预览" />)}</div>}<div className="composer-tools"><label className="soft-button upload-button"><Icon name="add_photo_alternate" />图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 9))} /></label><div className="emoji-row">{['😊','🐾','✨','❤️'].map((emoji) => <button type="button" key={emoji} onClick={() => addEmoji(emoji)}>{emoji}</button>)}</div><button className="primary-button compact" disabled={busy}>{busy ? '发布中…' : '发布动态'}</button></div></form>;
+  return <form className="composer" onSubmit={submit}><div className="composer-heading"><span className="composer-avatar"><Icon name="edit_note" /></span><div><b>分享一点今天的生活</b><small>可以添加话题，例如 #宠物日记</small></div></div><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={4} maxLength={5000} placeholder="此刻有什么想记录的？" />{preview.length > 0 && <div className="image-previews">{preview.map((url) => <img src={url} key={url} alt="待上传预览" />)}</div>}<div className="composer-tools"><label className="soft-button upload-button"><Icon name="add_photo_alternate" />图片<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 9))} /></label><EmojiPicker onSelect={addEmoji} /><button className="primary-button compact" disabled={busy}>{busy ? '发布中…' : '发布动态'}</button></div></form>;
 }
 
 function TopicShortcut({ title, active, onClick }: { title: string; active: boolean; onClick: (topic: Topic) => void }) {
@@ -206,7 +240,7 @@ function TopicShortcut({ title, active, onClick }: { title: string; active: bool
 }
 
 function PostCard({ post, session, profile, onRefresh, onError, onTopic }: { post: Post; session: Session | null; profile: Profile | null; onRefresh: () => void; onError: (message: string) => void; onTopic: (topic: Topic) => void }) {
-  const [showComments, setShowComments] = useState(false); const [comment, setComment] = useState(''); const [commentFiles, setCommentFiles] = useState<File[]>([]); const [commentPreviews, setCommentPreviews] = useState<string[]>([]); const [busy, setBusy] = useState(false);
+  const [showComments, setShowComments] = useState(false); const [comment, setComment] = useState(''); const [commentFiles, setCommentFiles] = useState<File[]>([]); const [commentPreviews, setCommentPreviews] = useState<string[]>([]); const [busy, setBusy] = useState(false); const commentFileInput = useRef<HTMLInputElement>(null);
   useEffect(() => { const urls = commentFiles.map((file) => URL.createObjectURL(file)); setCommentPreviews(urls); return () => urls.forEach(URL.revokeObjectURL); }, [commentFiles]);
   const name = post.profile?.display_name ?? '生活用户'; const date = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(post.created_at));
   const toggleLike = async () => { if (!supabase || !session) { onError('请先登录再点赞。'); return; } const result = post.liked ? await supabase.from('post_likes').delete().eq('post_id', post.id).eq('user_id', session.user.id) : await supabase.from('post_likes').insert({ post_id: post.id, user_id: session.user.id }); if (result.error) onError(result.error.message); else onRefresh(); };
@@ -221,7 +255,7 @@ function PostCard({ post, session, profile, onRefresh, onError, onTopic }: { pos
     {post.images?.length ? <div className={`post-images count-${Math.min(post.images.length, 4)}`}>{post.images.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="动态图片" loading="lazy" /></a>)}</div> : null}
     {post.topics && post.topics.length > 0 && <div className="post-topics">{post.topics.map((topic) => <button key={topic.id} onClick={() => onTopic(topic)}>#{topic.title}</button>)}</div>}
     <div className="post-actions"><button className={post.liked ? 'liked' : ''} onClick={() => void toggleLike()}><Icon name={post.liked ? 'favorite' : 'favorite_border'} />{post.likes ?? 0}</button><button onClick={() => setShowComments(!showComments)}><Icon name="chat_bubble" />{post.comments?.length ?? 0}</button><button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#post-${post.id}`).then(() => onError('动态链接已复制。')).catch(() => onError('复制失败，请手动分享链接。'))}><Icon name="ios_share" />分享</button></div>
-    {showComments && <div className="comments-panel">{(post.comments ?? []).map((item) => <div className="comment-row" key={item.id}><div className="comment-avatar">{item.profile?.avatar_url ? <img src={item.profile.avatar_url} alt="" /> : (item.profile?.display_name ?? '生').slice(0,1)}</div><b>{item.profile?.display_name ?? '生活用户'}</b><span>{item.body}{item.images?.length ? <span className="comment-images">{item.images.map((url) => <img key={url} src={url} alt="评论图片" loading="lazy" />)}</span> : null}</span>{item.author_id === session?.user.id && <button onClick={async () => { const { error } = await supabase!.from('comments').delete().eq('id', item.id); if (error) onError(error.message); else { if (item.image_paths.length) await supabase!.storage.from('community-media').remove(item.image_paths); onRefresh(); } }}>删除</button>}{session && item.author_id !== session.user.id && <button onClick={() => void report('comment', item.id)}>举报</button>}</div>)}{session && profile?.account_status === 'active' && <form className="comment-form" onSubmit={submitComment}><div className="comment-input-wrap"><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="留一句友善的评论… 😊" maxLength={2000} /><label className="comment-attach" aria-label="添加评论图片"><Icon name="add_photo_alternate" /><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => setCommentFiles(Array.from(event.target.files ?? []).slice(0,4))} /></label></div><button className="primary-button compact" disabled={busy || (!comment.trim() && !commentFiles.length)}>{busy ? '发送中…' : '发送'}</button>{commentPreviews.length > 0 && <div className="comment-previews">{commentPreviews.map((url) => <img key={url} src={url} alt="评论图片预览" />)}</div>}<div className="comment-emojis">{['😊','🐾','✨'].map((emoji) => <button type="button" key={emoji} onClick={() => setComment((previous) => `${previous}${emoji}`)}>{emoji}</button>)}</div></form>}</div>}
+    {showComments && <div className="comments-panel">{(post.comments ?? []).map((item) => <div className="comment-row" key={item.id}><div className="comment-avatar">{item.profile?.avatar_url ? <img src={item.profile.avatar_url} alt="" /> : (item.profile?.display_name ?? '生').slice(0,1)}</div><b>{item.profile?.display_name ?? '生活用户'}</b><span>{item.body}{item.images?.length ? <span className="comment-images">{item.images.map((url) => <img key={url} src={url} alt="评论图片" loading="lazy" />)}</span> : null}</span>{item.author_id === session?.user.id && <button type="button" onClick={async () => { const { error } = await supabase!.from('comments').delete().eq('id', item.id); if (error) onError(error.message); else { if (item.image_paths.length) await supabase!.storage.from('community-media').remove(item.image_paths); onRefresh(); } }}>删除</button>}{session && item.author_id !== session.user.id && <button type="button" onClick={() => void report('comment', item.id)}>举报</button>}</div>)}{session && profile?.account_status === 'active' && <form className="comment-form" onSubmit={submitComment}><div className="comment-input-wrap"><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="留一句友善的评论…" maxLength={2000} /><button className="comment-attach" type="button" aria-label="添加评论图片" title="添加图片" onClick={() => commentFileInput.current?.click()}><Icon name="add_photo_alternate" /></button><input ref={commentFileInput} className="visually-hidden-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { setCommentFiles(Array.from(event.currentTarget.files ?? []).slice(0,4)); event.currentTarget.value = ''; }} /></div><button className="primary-button compact comment-send" type="submit" disabled={busy || (!comment.trim() && !commentFiles.length)}>{busy ? '发送中…' : '发送'}</button>{commentPreviews.length > 0 && <div className="comment-previews">{commentPreviews.map((url) => <img key={url} src={url} alt="评论图片预览" />)}</div>}<EmojiPicker onSelect={(emoji) => setComment((previous) => `${previous}${emoji}`)} /></form>}</div>}
   </article>;
 }
 
