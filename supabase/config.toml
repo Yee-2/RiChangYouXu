@@ -13,7 +13,7 @@ verify_jwt = true
 verify_jwt = true
 
 [auth]
-additional_redirect_urls = ["https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/"]
+additional_redirect_urls = ["https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/", "http://localhost:5173/admin", "http://127.0.0.1:5173/admin"]
 site_url = "https://daily.yeecc.cn"
 
 [auth.email]

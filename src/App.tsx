@@ -18,7 +18,7 @@ const iconNames: Record<NavKey, string> = { home: 'home', lists: 'checklist', re
 
 export default function App() {
   const adminHost = window.location.hostname.toLowerCase() === 'admin.yeecc.cn';
-  const localAdminRoute = import.meta.env.DEV && window.location.hash === '#/admin';
+  const localAdminRoute = import.meta.env.DEV && (window.location.pathname === '/admin' || window.location.hash === '#/admin');
   if (adminHost || localAdminRoute) return <Suspense fallback={<div className="loading"><Icon name="progress_activity" className="spin" /><p>正在打开管理工作台…</p></div>}><AdminPortal /></Suspense>;
   if (window.location.hash === '#/admin') return <RedirectToAdmin />;
   return <LifeApp />;

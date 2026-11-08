@@ -61,7 +61,7 @@ function AdminLogin({ mode, setMode, notice, setNotice }: { mode: AuthMode; setM
     const email = String(values.get('email') ?? '').trim();
     try {
       if (mode === 'forgot') {
-        const redirectTo = window.location.hostname === 'admin.yeecc.cn' ? 'https://admin.yeecc.cn/' : `${window.location.origin}/`;
+        const redirectTo = window.location.hostname === 'admin.yeecc.cn' ? 'https://admin.yeecc.cn/' : `${window.location.origin}/admin`;
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
         if (resetError) throw resetError;
         setMessage('如果该邮箱对应可用账号，密码重置邮件会很快送达。');
