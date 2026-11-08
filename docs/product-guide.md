@@ -45,7 +45,7 @@ npm run dev
 
 ### 管理后台
 
-后台独立地址为 `https://admin.yeecc.cn/`，普通 App 的旧 `/#/admin` 地址会跳转过去。后台登录页只提供已授权账号的邮箱/密码登录和忘记密码，没有注册功能。重置密码邮件返回后台域名；普通用户即使能登录也无法进入工作台。管理员可以在账号管理中查看完整邮箱、按 UID 或邮箱查找已注册账号，并添加或撤销管理员权限；每次角色变更需二次确认、填写原因并写入操作记录。首次管理员仍由项目所有者在 Supabase SQL Editor 手工授予。
+后台独立地址为 `https://admin.yeecc.cn/`，普通 App 的旧 `/#/admin` 地址会跳转过去。后台登录页只提供已授权账号的邮箱/密码登录和忘记密码，没有注册功能。管理员身份单独存放在启用 RLS 的 `admin_accounts` 表中，普通用户对它没有访问权限；服务端不以 `profiles.role` 单独作为授权凭据。工作台右上角显示管理员名称和邮箱，三点菜单提供修改自己的密码与退出登录。“用户管理”可以搜索 UID/邮箱、筛选账号状态并按注册时间排序；“管理员账号”中可通过弹窗添加现有的已验证普通账号、撤销管理员，或设置其他管理员的新密码。添加、撤销和重置密码都需填写原因并写入操作记录。首次管理员由项目所有者在 Supabase SQL Editor 同时写入管理员表和 profile 兼容角色。
 
 工作台默认显示举报队列和对象详情，可检索举报、动态和评论，隐藏/恢复内容，或移除内容并删除图片。暂停账号可选择 24 小时、7 天或 30 天，到期后自动恢复社区写权限；永久封禁是独立状态，只能由管理员手动解封。隐藏和暂停直接执行，移除内容和永久封禁需二次确认；所有审核操作均填写原因并写入包含管理员、目标、动作、原因和时间的审计记录。
 
@@ -60,7 +60,7 @@ npm run dev
 ## 启用 Supabase 社区
 
 1. 创建 Supabase 项目。
-2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql` 和 `supabase/migrations/20261108130000_account_identity_admin_management.sql`。如果现有前三份已执行，只执行最后一份新迁移。
+2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql` 和 `supabase/migrations/20261108093526_separate_admin_accounts_and_filters.sql`。已执行的旧迁移不要重跑，只补执行尚未应用的迁移。
 3. 复制 `.env.example` 到 `.env.local`，填入 Project URL 与 anon/publishable key。
 4. 设置 Authentication 的邮箱验证与 redirect URL；配置站点 URL。Redirect URLs 需包含普通 App 的邮箱验证地址，以及后台密码恢复地址 `https://admin.yeecc.cn/`。
 5. 使用 Supabase CLI 登录、关联项目，并部署四个 Edge Function：
@@ -76,12 +76,22 @@ supabase functions deploy delete-content
 
 6. 在 Cloudflare 将 `admin.yeecc.cn` 作为现有 `richangyouxu` Worker 的另一个 Custom Domain 绑定，并确认 DNS、HTTPS 正常。前端会按 hostname 显示独立后台；`daily.yeecc.cn` 继续提供普通 App。
 
-7. 注册并验证首位管理员邮箱后，在 SQL Editor 以受信任账号执行：
+7. 注册并验证首位管理员邮箱后，在 SQL Editor 以受信任账号执行以下语句（将邮箱替换成首位管理员邮箱）：
 
 ```sql
+with target as (
+  select u.id, lower(u.email) as email
+  from auth.users u
+  where lower(u.email) = lower('admin@example.com')
+    and u.email_confirmed_at is not null
+)
+insert into public.admin_accounts(user_id, email, created_by)
+select id, email, id from target
+on conflict (user_id) do update set email = excluded.email;
+
 update public.profiles
 set role = 'admin'
-where id = (select id from auth.users where email = 'admin@example.com');
+where id = (select id from auth.users where lower(email) = lower('admin@example.com'));
 ```
 
 不要把 Supabase service-role key 放进 `.env.local`、前端或公开仓库。只将其作为 Edge Function 的服务端 secret 使用。

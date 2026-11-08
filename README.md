@@ -15,7 +15,7 @@ npm run dev
 
 ## 启用社区
 
-1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行迁移：`202611080001_initial_community.sql`、`202611080002_profile_avatar_policy.sql`、`20261108054808_complete_moderation_profile_workflows.sql`、`20261108130000_account_identity_admin_management.sql`。已执行旧迁移的项目，只补执行未应用的新迁移。
+1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 中的迁移。已执行旧迁移的项目只补执行尚未应用的迁移，包括新增管理员表迁移 `20261108093526_separate_admin_accounts_and_filters.sql`。
 2. 复制 `.env.example` 为 `.env.local`，填入 Project URL 和 anon/publishable key。
 3. 部署 Edge Functions：`admin-moderate`、`admin-manage`、`delete-account` 与 `delete-content`。PowerShell 请在项目目录使用 `npx.cmd`（避免执行策略拦截 `npx.ps1`）：依次执行 `npx.cmd supabase login`、`npx.cmd supabase link --project-ref obyqyzgycivgituobdzm`，再对四个函数分别执行 `npx.cmd supabase functions deploy <function-name> --use-api`。本配置已启用 JWT 校验；`--use-api` 部署不需要本地 Docker。
 4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs，加入后台密码恢复地址 `https://admin.yeecc.cn/`。
@@ -23,14 +23,21 @@ npm run dev
 6. 首次管理员先正常注册并验证邮箱，再由项目拥有者在 SQL Editor 执行：
 
 ```sql
-update public.profiles
-set role = 'admin'
-where id = (select id from auth.users where email = '你的管理员邮箱');
+with target as (
+  select u.id, lower(u.email) as email from auth.users u
+  where lower(u.email) = lower('你的管理员邮箱') and u.email_confirmed_at is not null
+)
+insert into public.admin_accounts(user_id, email, created_by)
+select id, email, id from target
+on conflict (user_id) do update set email = excluded.email;
+
+update public.profiles set role = 'admin'
+where id = (select id from auth.users where lower(email) = lower('你的管理员邮箱'));
 ```
 
 确认只有可信任的账号被提升为管理员。不要把 service-role key 放入 `.env.local` 或前端环境变量。
 
-后台只在 `https://admin.yeecc.cn/` 提供邮箱密码登录和忘记密码，没有注册入口。管理员之后可在账号管理页按短 UID 或邮箱添加已注册用户为管理员。
+后台只在 `https://admin.yeecc.cn/` 提供邮箱密码登录和忘记密码，没有注册入口。管理员之后可在“管理员账号”页通过弹窗，按 6 位 UID 或邮箱添加已验证的现有账号为管理员。
 
 ## 常用命令
 
