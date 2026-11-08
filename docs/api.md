@@ -2,7 +2,7 @@
 
 版本：0.1.0  
 后端：Supabase Auth、PostgREST、Storage、Edge Functions  
-迁移：按顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`
+迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`
 
 ## 连接与鉴权
 
@@ -43,7 +43,7 @@
 | `pets` | `id, name, kind, birthday?, note?, createdAt` |
 | `petEvents` | `id, petId, kind, title, date, reminderDate?, note?, completed, createdAt` |
 
-备份格式为 `{ schemaVersion: 1, exportedAt, data }`。导入前校验所有个人 store 为数组、每条记录含字符串 `id`；验证成功后用单个 IndexedDB read/write transaction 合并。
+备份格式为 `{ schemaVersion: 1, exportedAt, data }`。导入预览会显示各数据表数量及新增/覆盖数。写入前校验版本、导出时间、各记录必填字段/类型/日期、每表 ID 唯一性以及清单事项、表具读数、宠物事件的关联；总文件限制 20 MB。校验通过后用单个 IndexedDB read/write transaction 合并，相同 ID 覆盖，其他记录保留。校验失败不写入。
 
 ### 动态、话题与互动
 
@@ -65,6 +65,7 @@
 | `follows` | `POST /follows` | 当前用户关注其他用户；禁止关注自己 |
 | `follows` | `DELETE /follows?follower_id=eq.{uid}&followee_id=eq.{id}` | 取消自己的关注 |
 | `reports` | `POST /reports` | 登录用户举报动态、评论或账号，初始状态 `open` |
+| `reports` | `GET /reports?reporter_id=eq.{uid}&order=created_at.desc` | 用户读取自己的举报和处理状态；RLS 限制只能读本人记录 |
 
 动态正文最多 5,000 字；评论最多 2,000 字；动态最多 9 张图，评论最多 4 张图；每张图片最大 5 MB，MIME 仅接受 JPEG、PNG、WebP、GIF。
 
@@ -94,13 +95,24 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
   "targetType": "post",
   "targetId": "uuid",
   "reportId": "optional-uuid",
-  "reason": "违反社区规范"
+  "reason": "违反社区规范",
+  "suspensionHours": 24
 }
 ```
 
-支持动作：`hide_post`、`remove_post`、`restore_post`、`hide_comment`、`remove_comment`、`restore_comment`、`suspend_user`、`restore_user`、`handle_report`、`dismiss_report`。账号角色为 admin 的目标不能被暂停。若传 `reportId` 且动作是内容处理，会将该举报标记为 handled。
+支持动作：`hide_post`、`remove_post`、`restore_post`、`hide_comment`、`remove_comment`、`restore_comment`、`suspend_user`、`restore_user`、`ban_user`、`unban_user`、`handle_report`、`dismiss_report`。`suspend_user` 的 `suspensionHours` 必须为 `24`、`168` 或 `720`；数据库会以服务端时间判断暂停是否到期，Auth ban 同步设定期限。到期后现有会话的写操作自动恢复，管理员列表也显示恢复状态。`ban_user` 使用独立 `banned` 状态，只有 `unban_user` 能恢复。管理员账号不能被暂停或封禁。移除动态会隐藏其评论、清理动态与评论图片后标记移除；存储清理失败时内容保持隐藏并返回 `partial: true`。带 `reportId` 的成功处理会同步更新举报状态。
 
 成功：`{ "ok": true }`。常见错误：`401 unauthorized`、`403 forbidden`、`400 unsupported_action`、`400 invalid_request`。
+
+### `POST /functions/v1/delete-content`
+
+用户删除自己的动态/评论时调用。服务端校验 JWT、内容归属和账号状态，先隐藏内容，再删除相关 Storage 图片，最后删除数据库记录；删除动态时会一起处理其评论图片。媒体清理失败时内容保持隐藏，响应含 `partial: true`，客户端刷新后可见处理结果。
+
+```json
+{ "targetType": "post", "targetId": "uuid" }
+```
+
+成功：`{ "ok": true, "deletedMediaCount": 2 }`。其他用户、未登录用户、暂停中和封禁用户不能调用。
 
 ### `POST /functions/v1/delete-account`
 
@@ -121,9 +133,10 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 ## 权限摘要
 
-| 角色 | 浏览公开社区 | 发布互动 | 管理举报/内容 | 修改账号状态 |
-|---|---:|---:|---:|---:|
-| 未登录 | 是 | 否 | 否 | 否 |
-| 已验证普通用户 | 是 | 是 | 否 | 否 |
-| 暂停账号 | 公开读取 | 否 | 否 | 否 |
-| 管理员 | 是 | 是 | 是 | 通过受保护 Edge Function |
+| 角色 | 浏览公开社区 | 发布互动 | 读取本人举报 | 管理举报/内容 | 修改账号状态 |
+|---|---:|---:|---:|---:|---:|
+| 未登录 | 后端允许读取可见内容，应用界面显示登录引导 | 否 | 否 | 否 | 否 |
+| 邮箱验证后普通用户 | 是 | 是 | 是 | 否 | 否 |
+| 暂停中账号 | 是 | 到期前否；到期后自动恢复 | 是 | 否 | 否 |
+| 永久封禁账号 | 是 | 否 | 是 | 否 | 否 |
+| 管理员 | 是 | 是 | 是 | 是 | 通过受保护 Edge Function |

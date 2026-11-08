@@ -15,9 +15,9 @@ npm run dev
 
 ## 启用社区
 
-1. 创建 Supabase 项目，并在 SQL Editor 依次执行 `supabase/migrations/202611080001_initial_community.sql` 与 `supabase/migrations/202611080002_profile_avatar_policy.sql`。
+1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行三份迁移：`202611080001_initial_community.sql`、`202611080002_profile_avatar_policy.sql`、`20261108054808_complete_moderation_profile_workflows.sql`。前两份已执行过时，只补执行第三份。
 2. 复制 `.env.example` 为 `.env.local`，填入 Project URL 和 anon/publishable key。
-3. 部署 Edge Functions：`admin-moderate` 与 `delete-account`。PowerShell 请在项目目录使用 `npx.cmd`（避免执行策略拦截 `npx.ps1`）：依次执行 `npx.cmd supabase login`、`npx.cmd supabase link --project-ref obyqyzgycivgituobdzm`、`npx.cmd supabase functions deploy admin-moderate --use-api` 和 `npx.cmd supabase functions deploy delete-account --use-api`。本配置已启用 JWT 校验；`--use-api` 部署不需要本地 Docker。
+3. 部署 Edge Functions：`admin-moderate`、`delete-account` 与 `delete-content`。PowerShell 请在项目目录使用 `npx.cmd`（避免执行策略拦截 `npx.ps1`）：依次执行 `npx.cmd supabase login`、`npx.cmd supabase link --project-ref obyqyzgycivgituobdzm`，再对三个函数分别执行 `npx.cmd supabase functions deploy <function-name> --use-api`。本配置已启用 JWT 校验；`--use-api` 部署不需要本地 Docker。
 4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs。
 5. 首次管理员先正常注册并验证邮箱，再由项目拥有者在 SQL Editor 执行：
 

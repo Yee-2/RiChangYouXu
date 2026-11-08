@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import * as db from './db';
+import type { BackupPreview } from './db';
 import Community, { AccountSettings, AuthPage, type Profile as CommunityProfile } from './community';
 import { supabase } from './supabase';
 import { Icon } from './Icon';
@@ -8,9 +9,11 @@ import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, 
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
 type ProfileView = 'home' | 'auth' | 'account';
+const AdminPanel = lazy(() => import('./AdminPanel'));
 const emptyData: DataState = { checklists: [], checklistItems: [], checkTemplates: [], checkRuns: [], meters: [], meterReadings: [], pets: [], petEvents: [], preferences: [] };
 const id = () => crypto.randomUUID();
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
+const reminderLabel = (date?: string) => !date ? '未设置提醒' : date < today() ? `已逾期 · ${date}` : date === today() ? `今天提醒 · ${date}` : `提醒日期 · ${date}`;
 const iconNames: Record<NavKey, string> = { home: 'home', lists: 'checklist', records: 'monitoring', community: 'forum', profile: 'person' };
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
@@ -37,6 +40,9 @@ export default function App() {
   const [recordTab, setRecordTab] = useState<'utilities' | 'pets'>('utilities');
   const [toast, setToast] = useState('');
   const [session, setSession] = useState<Session | null>(null);
+  const [routeHash, setRouteHash] = useState(() => window.location.hash);
+  const [pendingBackup, setPendingBackup] = useState<{ fileName: string; payload: unknown; preview: BackupPreview } | null>(null);
+  const [importError, setImportError] = useState('');
 
   const refresh = async () => {
     const stores: StoreName[] = ['checklists', 'checklistItems', 'checkTemplates', 'checkRuns', 'meters', 'meterReadings', 'pets', 'petEvents', 'preferences'];
@@ -51,6 +57,12 @@ export default function App() {
     void supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
     return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const updateRoute = () => setRouteHash(window.location.hash);
+    window.addEventListener('hashchange', updateRoute);
+    return () => window.removeEventListener('hashchange', updateRoute);
   }, []);
 
   useEffect(() => {
@@ -224,11 +236,29 @@ export default function App() {
     } catch { setToast('导出失败，请检查浏览器存储空间。'); }
   };
 
-  const importBackup = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const file = (new FormData(event.currentTarget).get('backup') as File | null);
+  const inspectBackup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setPendingBackup(null); setImportError('');
+    const file = new FormData(event.currentTarget).get('backup') as File | null;
     if (!file) return;
-    try { await db.importPersonalData(JSON.parse(await file.text())); await refresh(); setToast('备份已合并导入'); setModal(null); }
-    catch (error) { setToast(error instanceof Error ? error.message : '导入失败，原有数据未更改。'); }
+    if (file.size > 20 * 1024 * 1024) { setImportError('备份文件不能超过 20 MB。'); return; }
+    try {
+      const payload: unknown = JSON.parse(await file.text());
+      const preview = await db.previewPersonalImport(payload);
+      setPendingBackup({ fileName: file.name, payload, preview });
+    } catch (error) { setImportError(error instanceof Error ? error.message : '备份校验失败，现有数据未更改。'); }
+  };
+
+  const importBackup = async () => {
+    if (!pendingBackup) return;
+    setImportError('');
+    try {
+      const result = await db.importPersonalData(pendingBackup.payload);
+      await refresh();
+      const added = result.stores.reduce((sum, item) => sum + item.added, 0);
+      const overwritten = result.stores.reduce((sum, item) => sum + item.overwritten, 0);
+      setToast(`已导入 ${result.total} 条记录：新增 ${added} 条，覆盖 ${overwritten} 条。`);
+      setPendingBackup(null); setModal(null);
+    } catch (error) { setImportError(error instanceof Error ? error.message : '导入失败，原有数据未更改。'); }
   };
 
   const clearData = async () => {
@@ -244,16 +274,18 @@ export default function App() {
 
   if (!ready) return <div className="loading"><Icon name="progress_activity" className="spin" /><p>正在准备你的生活空间…</p></div>;
 
+  if (routeHash === '#/admin') return <Suspense fallback={<div className="loading"><Icon name="progress_activity" className="spin" /><p>正在打开管理工作台…</p></div>}><AdminPanel session={session} onExit={() => { window.location.hash = ''; setNav('community'); }} /></Suspense>;
+
   return <div className="app-shell">
     <header className="topbar">
       <a className="brand" href="#home" onClick={(event) => { event.preventDefault(); setNav('home'); }}><span className="brandmark"><Icon name="auto_awesome" size={18} /></span><span>日常有序</span></a>
       <div className="top-actions"><span className="date-chip">{new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date())}</span><button className="icon-button theme-button" onClick={() => void handleTheme()} aria-label="切换日间或夜间主题"><Icon name={document.documentElement.dataset.theme === 'dark' ? 'light_mode' : 'dark_mode'} /></button></div>
     </header>
     <main className="main-content">
-      {nav === 'home' && <HomePage items={data.checklistItems} runs={data.checkRuns} templates={data.checkTemplates} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={activePetReminders} onGo={setNav} onStartRun={startRun} onToggleRun={toggleRunItem} onAddReading={() => setModal('reading')} />}
+      {nav === 'home' && <HomePage lists={data.checklists} items={data.checklistItems} runs={data.checkRuns} templates={data.checkTemplates} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={activePetReminders} onGo={setNav} onStartRun={startRun} onToggleRun={toggleRunItem} onAddReading={() => setModal('reading')} />}
       {nav === 'lists' && <ListsPage lists={data.checklists} listItems={data.checklistItems} templates={data.checkTemplates} runs={data.checkRuns} selected={selectedChecklist} setSelected={setSelectedChecklist} onNewList={() => setModal('checklist')} onNewItem={(listId) => { setSelectedChecklist(listId); setModal('item'); }} onToggleItem={toggleItem} onNewTemplate={() => setModal('template')} onStartRun={startRun} onToggleRun={toggleRunItem} onExample={createExampleChecklist} onRename={renameChecklist} onArchive={toggleChecklistArchive} onDelete={deleteChecklist} onEditTemplate={editTemplate} onCopyTemplate={copyTemplate} onDeleteTemplate={deleteTemplate} />}
       {nav === 'records' && <RecordsPage tab={recordTab} setTab={setRecordTab} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={data.petEvents} onAddMeter={() => setModal('meter')} onAddReading={() => setModal('reading')} onAddPet={() => setModal('pet')} onAddPetEvent={() => setModal('pet-event')} onToggleEvent={markPetEvent} />}
-      {nav === 'community' && <Community session={session} />}
+      {nav === 'community' && <Community session={session} onOpenMy={() => setNav('profile')} />}
       {nav === 'profile' && <ProfilePage session={session} view={profileView} setView={setProfileView} onMessage={setToast} onTheme={handleTheme} onExport={exportBackup} onImport={() => setModal('import')} onClear={clearData} />}
     </main>
     <nav className="bottom-nav" aria-label="主导航">
@@ -269,31 +301,32 @@ export default function App() {
     {modal === 'reading' && <Modal title="记录抄表读数" onClose={() => setModal(null)}>{data.meters.length === 0 ? <div className="empty-state"><Icon name="water_drop" size={30} /><p>先添加一块水、电或燃气表。</p><button className="primary-button" onClick={() => setModal('meter')}>添加表具</button></div> : <form onSubmit={createReading} className="form-stack"><Field label="选择表具"><select name="meterId">{data.meters.map((meter) => <option key={meter.id} value={meter.id}>{meter.name}</option>)}</select></Field><Field label="当前读数"><input autoFocus name="value" type="number" min="0" step="0.001" required placeholder="输入表盘数值" /></Field><Field label="抄表日期"><input name="date" type="date" defaultValue={today()} required /></Field><Field label="备注（可选）"><input name="note" placeholder="例如：本月账单金额" maxLength={200} /></Field><button className="primary-button">保存读数</button></form>}</Modal>}
     {modal === 'pet' && <Modal title="添加宠物档案" onClose={() => setModal(null)}><form onSubmit={createPet} className="form-stack"><Field label="宠物名字"><input autoFocus name="name" placeholder="怎么称呼它？" required maxLength={40} /></Field><Field label="种类"><input name="kind" placeholder="猫、狗或其他" defaultValue="猫咪" maxLength={40} /></Field><Field label="生日（可选）"><input name="birthday" type="date" /></Field><Field label="备注（可选）"><textarea name="note" rows={3} placeholder="品种、习惯或过敏信息" /></Field><button className="primary-button">保存档案</button></form></Modal>}
     {modal === 'pet-event' && <Modal title="添加宠物记录" onClose={() => setModal(null)}><form onSubmit={createPetEvent} className="form-stack"><Field label="宠物"><select name="petId">{data.pets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></Field><Field label="记录类型"><select name="kind"><option value="feeding">喂养</option><option value="weight">体重</option><option value="vaccine">疫苗</option><option value="deworming">驱虫</option><option value="visit">就诊</option><option value="custom">其他</option></select></Field><Field label="内容"><input autoFocus name="title" placeholder="例如：体重 4.2 kg" required maxLength={100} /></Field><Field label="记录日期"><input name="date" type="date" defaultValue={today()} required /></Field><Field label="提醒日期（可选）"><input name="reminderDate" type="date" /></Field><Field label="备注"><textarea name="note" rows={2} /></Field><button className="primary-button">保存记录</button></form></Modal>}
-    {modal === 'import' && <Modal title="导入本机备份" onClose={() => setModal(null)}><p className="modal-copy">导入会按记录 ID 合并，遇到相同 ID 时以备份内容覆盖。社区账号和线上内容不包含在备份中。</p><form onSubmit={importBackup} className="form-stack"><Field label="选择 JSON 备份文件"><input name="backup" type="file" accept="application/json,.json" required /></Field><button className="primary-button">校验并导入</button></form></Modal>}
+    {modal === 'import' && <Modal title="导入本机备份" onClose={() => { setModal(null); setPendingBackup(null); setImportError(''); }}><p className="modal-copy">先检查备份内容再确认导入。采用合并方式：相同记录 ID 会覆盖，其他本机数据保留；社区账号和线上内容不包含在备份中。</p><form onSubmit={inspectBackup} className="form-stack"><Field label="选择 JSON 备份文件（最大 20 MB）"><input name="backup" type="file" accept="application/json,.json" required onChange={() => { setPendingBackup(null); setImportError(''); }} /></Field><button className="soft-button">检查备份内容</button></form>{importError && <p className="form-error" role="alert">{importError}</p>}{pendingBackup && <section className="backup-preview"><h3>备份预览</h3><p>{pendingBackup.fileName} · 导出于 {new Date(pendingBackup.preview.exportedAt).toLocaleString('zh-CN')} · 共 {pendingBackup.preview.total} 条</p><div className="backup-preview-grid">{pendingBackup.preview.stores.filter((item) => item.count > 0).map((item) => <div key={item.store}><b>{item.label}</b><small>{item.count} 条 · 新增 {item.added} · 覆盖 {item.overwritten}</small></div>)}</div><button className="primary-button" type="button" onClick={() => void importBackup()}>确认合并导入</button></section>}</Modal>}
   </div>;
 }
 
-function HomePage({ items, runs, templates, meters, readings, pets, events, onGo, onStartRun, onToggleRun, onAddReading }: { items: ChecklistItem[]; runs: CheckRun[]; templates: CheckTemplate[]; meters: Meter[]; readings: MeterReading[]; pets: Pet[]; events: PetEvent[]; onGo: (nav: NavKey) => void; onStartRun: (template: CheckTemplate) => void; onToggleRun: (run: CheckRun, itemId: string) => void; onAddReading: () => void }) {
+function HomePage({ lists, items, runs, templates, meters, readings, pets, events, onGo, onStartRun, onToggleRun, onAddReading }: { lists: Checklist[]; items: ChecklistItem[]; runs: CheckRun[]; templates: CheckTemplate[]; meters: Meter[]; readings: MeterReading[]; pets: Pet[]; events: PetEvent[]; onGo: (nav: NavKey) => void; onStartRun: (template: CheckTemplate) => void; onToggleRun: (run: CheckRun, itemId: string) => void; onAddReading: () => void }) {
   const activeRuns = runs.filter((run) => !run.completedAt);
-  const todayItems = items.filter((item) => !item.dueDate || item.dueDate <= today());
+  const activeListIds = new Set(lists.filter((list) => !list.archivedAt).map((list) => list.id));
+  const todayScope = items.filter((item) => activeListIds.has(item.checklistId) && (!item.dueDate || item.dueDate <= today()));
+  const todayItems = todayScope.filter((item) => !item.done);
+  const todayCompleted = todayScope.filter((item) => item.done).length;
   const reading = readings.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
   return <>
     <section className="welcome-row"><div><p className="eyebrow">慢一点，也能安排好</p><h1>早上好，<span>今天想先做哪件小事？</span></h1></div><div className="sun-badge"><Icon name="wb_sunny" size={24} /></div></section>
-    <section className="hero-card"><div className="hero-content"><span className="eyebrow light-text">TODAY · {todayItems.length} 项待办</span><h2>先从一件小事开始</h2><p>完成 {Math.max(0, dataCompleted(items))} 项，给今天留一点从容。</p><div className="hero-progress"><i style={{ width: `${items.length ? Math.round((dataCompleted(items) / (items.length + dataCompleted(items))) * 100) : 0}%` }} /></div></div><div className="hero-art"><Icon name="auto_awesome" size={70} /></div></section>
+    <section className="hero-card"><div className="hero-content"><span className="eyebrow light-text">TODAY · {todayItems.length} 项待办</span><h2>先从一件小事开始</h2><p>今日完成 {todayCompleted} / {todayScope.length} 项，给今天留一点从容。</p><div className="hero-progress"><i style={{ width: `${todayScope.length ? Math.round(todayCompleted / todayScope.length * 100) : 0}%` }} /></div></div><div className="hero-art"><Icon name="auto_awesome" size={70} /></div></section>
     <section className="home-section"><div className="section-heading"><div><p className="eyebrow">先看这一些</p><h2>今天要记得</h2></div><button className="text-button" onClick={() => onGo('lists')}>全部清单 <Icon name="arrow_forward" size={17} /></button></div>
-      {todayItems.length === 0 ? <div className="inline-empty"><Icon name="task_alt" size={22} /><span>今天没有待办，享受一点空白时间吧。</span></div> : todayItems.slice(0, 4).map((item, index) => <div className="home-task" key={item.id}><span className={`task-icon tint-${index % 3}`}><Icon name={index === 0 ? 'pets' : index === 1 ? 'water_drop' : 'checklist'} /></span><div className="task-label"><b>{item.title}</b><small>{item.dueDate || '生活清单'}</small></div><Icon name="chevron_right" size={20} /></div>)}
+      {todayItems.length === 0 ? <div className="inline-empty"><Icon name="task_alt" size={22} /><span>今天没有待办，享受一点空白时间吧。</span></div> : todayItems.slice(0, 4).map((item, index) => <div className="home-task" key={item.id}><span className={`task-icon tint-${index % 3}`}><Icon name={index === 0 ? 'pets' : index === 1 ? 'water_drop' : 'checklist'} /></span><div className="task-label"><b>{item.title}</b><small>{item.dueDate ? item.dueDate < today() ? `已逾期 · ${item.dueDate}` : item.dueDate : '未设置日期'}</small></div><Icon name="chevron_right" size={20} /></div>)}
     </section>
     <div className="dashboard-grid">
       <section className="surface-card"><div className="card-head"><span className="tile-icon blue"><Icon name="water_drop" /></span><button className="icon-button small" onClick={onAddReading} aria-label="记录抄表"><Icon name="add" size={20} /></button></div><p className="eyebrow">水电燃气</p><h3>{reading ? `${reading.value} ${meters.find((meter) => meter.id === reading.meterId)?.unit ?? ''}` : '还没有抄表记录'}</h3><p className="muted">{reading ? `${meters.find((meter) => meter.id === reading.meterId)?.name ?? '表具'} · ${reading.date}` : '添加表具，轻松记录每月用量'}</p><button className="subtle-button" onClick={() => onGo('records')}>查看记录 <Icon name="arrow_forward" size={16} /></button></section>
-      <section className="surface-card"><div className="card-head"><span className="tile-icon pink"><Icon name="pets" /></span><button className="icon-button small" onClick={() => onGo('records')} aria-label="查看宠物"><Icon name="arrow_forward" size={19} /></button></div><p className="eyebrow">宠物照护</p><h3>{pets.length ? `${pets.length} 位小伙伴` : '给毛孩子建个档案'}</h3><p className="muted">{events.length ? `${events[0].title} · ${events[0].reminderDate}` : '记录喂养、体重和重要日期'}</p><button className="subtle-button" onClick={() => onGo('records')}>宠物记录 <Icon name="arrow_forward" size={16} /></button></section>
+      <section className="surface-card"><div className="card-head"><span className="tile-icon pink"><Icon name="pets" /></span><button className="icon-button small" onClick={() => onGo('records')} aria-label="查看宠物"><Icon name="arrow_forward" size={19} /></button></div><p className="eyebrow">宠物照护</p><h3>{pets.length ? `${pets.length} 位小伙伴` : '给毛孩子建个档案'}</h3><p className="muted">{events.length ? `${events[0].title} · ${reminderLabel(events[0].reminderDate)}` : '记录喂养、体重和重要日期'}</p><button className="subtle-button" onClick={() => onGo('records')}>宠物记录 <Icon name="arrow_forward" size={16} /></button></section>
     </div>
     <section className="home-section"><div className="section-heading"><div><p className="eyebrow">出门不遗漏</p><h2>随手开始检查</h2></div><button className="text-button" onClick={() => onGo('lists')}>管理模板 <Icon name="arrow_forward" size={17} /></button></div>
       <div className="template-row">{activeRuns.map((run) => <div className="run-card" key={run.id}><b>{run.title}</b><small>{run.items.filter((item) => item.done).length}/{run.items.length} 项完成</small><div className="run-items">{run.items.map((item) => <label key={item.id} className={item.done ? 'checked' : ''}><input type="checkbox" checked={item.done} onChange={() => onToggleRun(run, item.id)} />{item.title}</label>)}</div></div>)}{templates.slice(0, 3).map((template) => <button className="template-card" key={template.id} onClick={() => onStartRun(template)}><span className="tile-icon amber"><Icon name="door_open" /></span><b>{template.title}</b><small>{template.items.length} 项检查</small><span className="open-circle"><Icon name="arrow_outward" size={17} /></span></button>)}</div>
     </section>
   </>;
 }
-
-function dataCompleted(items: ChecklistItem[]) { return items.filter((item) => item.done).length; }
 
 function ListsPage({ lists, listItems, templates, runs, selected, setSelected, onNewList, onNewItem, onToggleItem, onNewTemplate, onStartRun, onToggleRun, onExample, onRename, onArchive, onDelete, onEditTemplate, onCopyTemplate, onDeleteTemplate }: { lists: Checklist[]; listItems: ChecklistItem[]; templates: CheckTemplate[]; runs: CheckRun[]; selected: string | null; setSelected: (id: string | null) => void; onNewList: () => void; onNewItem: (listId: string) => void; onToggleItem: (item: ChecklistItem) => void; onNewTemplate: () => void; onStartRun: (template: CheckTemplate) => void; onToggleRun: (run: CheckRun, itemId: string) => void; onExample: (kind: 'travel' | 'move') => void; onRename: (list: Checklist) => void; onArchive: (list: Checklist) => void; onDelete: (list: Checklist) => void; onEditTemplate: (template: CheckTemplate) => void; onCopyTemplate: (template: CheckTemplate) => void; onDeleteTemplate: (template: CheckTemplate) => void }) {
   const activeLists = lists.filter((list) => !list.archivedAt);
@@ -314,7 +347,7 @@ function RecordsPage({ tab, setTab, meters, readings, pets, events, onAddMeter, 
   return <>
     <PageTitle eyebrow="把重要日常轻轻记下" title="生活记录" />
     <div className="subnav-tabs"><button className={tab === 'utilities' ? 'selected' : ''} onClick={() => setTab('utilities')}><Icon name="water_drop" size={18} />水电燃气</button><button className={tab === 'pets' ? 'selected' : ''} onClick={() => setTab('pets')}><Icon name="pets" size={18} />宠物日常</button></div>
-    {tab === 'utilities' ? <><div className="section-heading"><div><p className="eyebrow">每次抄表都会保留下来</p><h2>我的表具</h2></div><div className="button-pair"><button className="soft-button" onClick={onAddMeter}><Icon name="add" />添加表具</button><button className="primary-button compact" onClick={onAddReading}><Icon name="edit_note" />记读数</button></div></div>{meters.length === 0 ? <EmptyCard icon="water_drop" title="添加第一块表具" detail="手动记录读数，自动计算相邻两次的用量。" action={<button className="primary-button" onClick={onAddMeter}>添加表具</button>} /> : <div className="record-grid">{meters.map((meter) => { const history = readings.filter((reading) => reading.meterId === meter.id).sort((a, b) => b.date.localeCompare(a.date)); const latest = history[0]; const previous = history[1]; return <article className="surface-card meter-card" key={meter.id}><div className="card-head"><span className={`tile-icon ${meter.kind === 'water' ? 'blue' : meter.kind === 'electricity' ? 'amber' : 'pink'}`}><Icon name={meter.kind === 'water' ? 'water_drop' : meter.kind === 'electricity' ? 'bolt' : 'local_fire_department'} /></span><span className="kind-chip">{meter.kind === 'water' ? '水表' : meter.kind === 'electricity' ? '电表' : '燃气表'}</span></div><p className="eyebrow">{meter.name}</p><h3>{latest ? `${latest.value} ${meter.unit}` : '等待首次抄表'}</h3><p className="muted">{latest ? `${latest.date}${previous ? ` · 上期用量 ${(latest.value - previous.value).toFixed(2)} ${meter.unit}` : ''}` : '添加一条读数开始记录'}</p>{history.slice(0, 5).map((reading) => <div className="history-line" key={reading.id}><span>{reading.date}</span><b>{reading.value} {meter.unit}</b></div>)}</article>; })}</div>}</> : <><div className="section-heading"><div><p className="eyebrow">它们的日常，也值得好好记录</p><h2>宠物档案</h2></div><div className="button-pair"><button className="soft-button" onClick={onAddPet}><Icon name="add" />添加宠物</button>{pets.length > 0 && <button className="primary-button compact" onClick={onAddPetEvent}><Icon name="edit_note" />记一件事</button>}</div></div>{pets.length === 0 ? <EmptyCard icon="pets" title="给毛孩子建个小档案" detail="保存基本信息，再记录喂养、体重、疫苗和重要日期。" action={<button className="primary-button" onClick={onAddPet}>添加宠物档案</button>} /> : <div className="record-grid pet-grid">{pets.map((pet) => { const petHistory = events.filter((event) => event.petId === pet.id).sort((a, b) => b.date.localeCompare(a.date)); return <article className="surface-card pet-card" key={pet.id}><div className="pet-avatar"><Icon name="pets" size={27} /></div><p className="eyebrow">{pet.kind}{pet.birthday ? ` · ${pet.birthday} 生日` : ''}</p><h3>{pet.name}</h3>{pet.note && <p className="muted">{pet.note}</p>}<div className="pet-history">{petHistory.length ? petHistory.slice(0, 5).map((event) => <div className="history-line" key={event.id}><span><Icon name={event.completed ? 'task_alt' : 'event'} size={16} />{event.title}</span><b>{event.date}</b></div>) : <p className="muted">还没有日常记录</p>}</div></article>; })}</div>}{events.length > 0 && <section className="home-section"><div className="section-heading"><div><p className="eyebrow">要记得的事情</p><h2>宠物提醒</h2></div></div>{events.filter((event) => !event.completed).map((event) => <div className="home-task" key={event.id}><span className="task-icon tint-2"><Icon name="notifications_active" /></span><div className="task-label"><b>{event.title}</b><small>{pets.find((pet) => pet.id === event.petId)?.name} · {event.reminderDate}</small></div><button className="soft-button" onClick={() => onToggleEvent(event)}>完成</button></div>)}</section>}</>}
+    {tab === 'utilities' ? <><div className="section-heading"><div><p className="eyebrow">每次抄表都会保留下来</p><h2>我的表具</h2></div><div className="button-pair"><button className="soft-button" onClick={onAddMeter}><Icon name="add" />添加表具</button><button className="primary-button compact" onClick={onAddReading}><Icon name="edit_note" />记读数</button></div></div>{meters.length === 0 ? <EmptyCard icon="water_drop" title="添加第一块表具" detail="手动记录读数，自动计算相邻两次的用量。" action={<button className="primary-button" onClick={onAddMeter}>添加表具</button>} /> : <div className="record-grid">{meters.map((meter) => { const history = readings.filter((reading) => reading.meterId === meter.id).sort((a, b) => b.date.localeCompare(a.date)); const latest = history[0]; const previous = history[1]; return <article className="surface-card meter-card" key={meter.id}><div className="card-head"><span className={`tile-icon ${meter.kind === 'water' ? 'blue' : meter.kind === 'electricity' ? 'amber' : 'pink'}`}><Icon name={meter.kind === 'water' ? 'water_drop' : meter.kind === 'electricity' ? 'bolt' : 'local_fire_department'} /></span><span className="kind-chip">{meter.kind === 'water' ? '水表' : meter.kind === 'electricity' ? '电表' : '燃气表'}</span></div><p className="eyebrow">{meter.name}</p><h3>{latest ? `${latest.value} ${meter.unit}` : '等待首次抄表'}</h3><p className="muted">{latest ? `${latest.date}${previous ? ` · 上期用量 ${(latest.value - previous.value).toFixed(2)} ${meter.unit}` : ''}` : '添加一条读数开始记录'}</p>{history.slice(0, 5).map((reading) => <div className="history-line" key={reading.id}><span>{reading.date}</span><b>{reading.value} {meter.unit}</b></div>)}</article>; })}</div>}</> : <><div className="section-heading"><div><p className="eyebrow">它们的日常，也值得好好记录</p><h2>宠物档案</h2></div><div className="button-pair"><button className="soft-button" onClick={onAddPet}><Icon name="add" />添加宠物</button>{pets.length > 0 && <button className="primary-button compact" onClick={onAddPetEvent}><Icon name="edit_note" />记一件事</button>}</div></div>{pets.length === 0 ? <EmptyCard icon="pets" title="给毛孩子建个小档案" detail="保存基本信息，再记录喂养、体重、疫苗和重要日期。" action={<button className="primary-button" onClick={onAddPet}>添加宠物档案</button>} /> : <div className="record-grid pet-grid">{pets.map((pet) => { const petHistory = events.filter((event) => event.petId === pet.id).sort((a, b) => b.date.localeCompare(a.date)); return <article className="surface-card pet-card" key={pet.id}><div className="pet-avatar"><Icon name="pets" size={27} /></div><p className="eyebrow">{pet.kind}{pet.birthday ? ` · ${pet.birthday} 生日` : ''}</p><h3>{pet.name}</h3>{pet.note && <p className="muted">{pet.note}</p>}<div className="pet-history">{petHistory.length ? petHistory.slice(0, 5).map((event) => <div className="history-line" key={event.id}><span><Icon name={event.completed ? 'task_alt' : 'event'} size={16} />{event.title}</span><b>{event.date}</b></div>) : <p className="muted">还没有日常记录</p>}</div></article>; })}</div>}{events.length > 0 && <section className="home-section"><div className="section-heading"><div><p className="eyebrow">要记得的事情</p><h2>宠物提醒</h2></div></div>{events.filter((event) => !event.completed).map((event) => <div className="home-task" key={event.id}><span className="task-icon tint-2"><Icon name="notifications_active" /></span><div className="task-label"><b>{event.title}</b><small>{pets.find((pet) => pet.id === event.petId)?.name} · {reminderLabel(event.reminderDate)}</small></div><button className="soft-button" onClick={() => onToggleEvent(event)}>完成</button></div>)}</section>}</>}
   </>;
 }
 
