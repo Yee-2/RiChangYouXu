@@ -21,13 +21,13 @@
 | 密码登录 | `auth.signInWithPassword({ email, password })` | 仅已验证邮箱可正常登录 |
 | 验证码登录 | `auth.signInWithOtp({ email, options: { shouldCreateUser: false } })` 后调用 `auth.verifyOtp({ email, token, type: 'email' })` | 只允许已有账号登录，不会通过登录验证码自动注册；登录邮件使用 `magic_link` 模板发送数字验证码 |
 | 退出 | `auth.signOut()` | 清除本机 Supabase 会话 |
-| 忘记密码 | `auth.resetPasswordForEmail(email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })` | 先验证 8 位邮箱验证码，再设置至少 8 位且包含英文字母和数字的新密码；验证码 10 分钟有效 |
+| 忘记密码 | `auth.resetPasswordForEmail(email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })` | 先验证 6 位邮箱验证码，再设置至少 8 位且包含英文字母和数字的新密码；验证码 10 分钟有效 |
 | 修改密码 | `auth.resetPasswordForEmail(session.user.email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })`、`auth.signOut()` | 账号设置页要求验证当前账号邮箱；新密码至少 8 位且包含英文字母和数字。成功后提示完成并返回密码登录页，需重新登录。管理员本人修改密码也使用验证码；管理员重置其他管理员密码仍由服务端 Auth Admin API 执行并记录原因 |
 | 重发验证码 | 注册调用 `auth.resend({ type: 'signup', email })`；验证码登录重复调用 `auth.signInWithOtp(...)`；密码恢复重复调用 `auth.resetPasswordForEmail(email)` | 页面显示 60 秒倒计时后允许重新发送，并提示发送成功或失败 |
 
 管理员登录使用 Supabase Auth 邮箱账号，只能从 `https://admin.yeecc.cn/` 登录；后台不提供注册。管理员权限唯一来源为启用 RLS 的 `public.admin_accounts` 表，普通用户没有该表的读写权限；`profiles.role` 仅作兼容字段，不能单独授予后台权限。后台忘记密码用同一 Resend 邮件发送验证码，不使用密码重置链接；后台地址保留在 Supabase Authentication → URL Configuration 的 Redirect URLs 中，以兼容现有会话与历史链接。
 
-Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 SMTP 设置为主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`；Resend API key 只保存在 Supabase Auth 的 SMTP 密码配置，不放入前端环境变量或 Git。验证码为 8 位数字，有效期 10 分钟，发送间隔至少 60 秒。`npx.cmd supabase config push --yes` 用于推送本仓库中的验证码有效期和邮件模板；SMTP 凭据需在 Supabase Dashboard 的 Authentication → SMTP Settings 配置，或通过 Supabase Management API 配置。注册、恢复密码和验证码登录模板分别为 `supabase/templates/confirmation.html`、`supabase/templates/recovery.html`、`supabase/templates/magic_link.html`。
+Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 SMTP 设置为主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`；Resend API key 只保存在 Supabase Auth 的 SMTP 密码配置，不放入前端环境变量或 Git。验证码为 6 位数字，有效期 10 分钟，发送间隔至少 60 秒。`npx.cmd supabase config push --yes` 用于推送本仓库中的验证码有效期和邮件模板；SMTP 凭据需在 Supabase Dashboard 的 Authentication → SMTP Settings 配置，或通过 Supabase Management API 配置。注册、恢复密码和验证码登录模板分别为 `supabase/templates/confirmation.html`、`supabase/templates/recovery.html`、`supabase/templates/magic_link.html`。
 
 ## 数据访问接口
 

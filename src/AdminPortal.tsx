@@ -79,7 +79,7 @@ function AdminLogin({ mode, setMode, notice, setNotice }: { mode: AuthMode; setM
           setResetEmail(email); setResetCodeSent(true); startResendCooldown();
           setMessage('如果该邮箱对应可用管理员账号，验证码会很快送达。');
         } else {
-          if (!/^\d{8}$/.test(otp)) throw new Error('请输入邮件中的 8 位数字验证码。');
+          if (!/^\d{6}$/.test(otp)) throw new Error('请输入邮件中的 6 位数字验证码。');
           if (password.length < 8) throw new Error('新密码至少需要 8 位。');
           if (password !== confirmPassword) throw new Error('两次输入的新密码不一致。');
           const { error: verifyError } = await supabase.auth.verifyOtp({ email, token: otp, type: 'recovery' });
@@ -123,7 +123,7 @@ function AdminLogin({ mode, setMode, notice, setNotice }: { mode: AuthMode; setM
       <form className="admin-login-form" onSubmit={submit}>
         <label><span>管理员邮箱</span><input name="email" type="email" autoComplete="username" placeholder="name@example.com" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} readOnly={resetCodeSent} required /></label>
         {mode === 'login' && <label><span>密码</span><input name="password" type="password" autoComplete="current-password" placeholder="输入密码" required /></label>}
-        {mode === 'forgot' && resetCodeSent && <><label><span>邮箱验证码</span><input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="输入 8 位数字验证码" required /></label><label><span>新密码</span><input type="password" minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label><span>确认新密码</span><input type="password" minLength={8} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label><button type="button" className="text-button" disabled={busy || resendSeconds > 0} onClick={() => void resendResetCode()}>{resendSeconds > 0 ? `${resendSeconds} 秒后可重发` : '重新发送验证码'}</button></>}
+        {mode === 'forgot' && resetCodeSent && <><label><span>邮箱验证码</span><input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="输入 6 位数字验证码" required /></label><label><span>新密码</span><input type="password" minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label><span>确认新密码</span><input type="password" minLength={8} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label><button type="button" className="text-button" disabled={busy || resendSeconds > 0} onClick={() => void resendResetCode()}>{resendSeconds > 0 ? `${resendSeconds} 秒后可重发` : '重新发送验证码'}</button></>}
         {notice && <p className="admin-auth-notice">{notice}</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         {message && <p className="form-success" role="status">{message}</p>}

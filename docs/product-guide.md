@@ -39,7 +39,7 @@ npm run dev
 
 ### 社区
 
-登录页提供密码登录和验证码登录。验证码登录只允许已有账号使用，不会创建新账号。注册页和找回密码页均先发送 8 位邮箱验证码，再提交验证码和密码；新密码至少 8 位且包含英文字母和数字。验证码 10 分钟有效，每 60 秒可重新发送。验证邮件使用已验证的 `yeecc.cn` 发件域名，由 Supabase Auth 通过 Resend SMTP 投递。
+登录页提供密码登录和验证码登录。验证码登录只允许已有账号使用，不会创建新账号。注册页和找回密码页均先发送 6 位邮箱验证码，再提交验证码和密码；新密码至少 8 位且包含英文字母和数字。验证码 10 分钟有效，每 60 秒可重新发送。验证邮件使用已验证的 `yeecc.cn` 发件域名，由 Supabase Auth 通过 Resend SMTP 投递。
 
 验证邮箱后可发布文字和图片动态、添加 `#话题`、添加评论、表情、点赞、关注作者和举报内容。点击动态或评论作者可查看公开主页、简介、动态与关注数据，也可关注/取消关注或举报账号。动态图片最多 9 张，单张 5 MB；评论图片最多 4 张。删除自己的动态或评论时会先隐藏内容，再通过服务端清理关联图片；如果图片清理失败，内容会保持隐藏并提示重试。删除账号会永久删除线上社区内容和媒体，但保留本机生活记录。
 
@@ -64,7 +64,7 @@ npm run dev
 1. 创建 Supabase 项目。
 2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql` 和 `supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`。已执行的旧迁移不要重跑，只补执行尚未应用的迁移。
 3. 复制 `.env.example` 到 `.env.local`，填入 Project URL 与 anon/publishable key。
-4. 在 Supabase Dashboard 的 Authentication → SMTP Settings 配置自定义 SMTP：主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`，密码使用 Resend API key。密钥只保存在 Supabase Auth SMTP 配置中，不能放入公开前端变量或 Git。然后运行 `npx.cmd supabase config push --yes` 推送 `supabase/config.toml` 中的 8 位验证码、10 分钟有效期和 `supabase/templates/` 内的注册/找回密码模板。启用邮箱验证；Redirect URLs 保留普通 App 与后台 `https://admin.yeecc.cn/`。
+4. 在 Supabase Dashboard 的 Authentication → SMTP Settings 配置自定义 SMTP：主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`，密码使用 Resend API key。密钥只保存在 Supabase Auth SMTP 配置中，不能放入公开前端变量或 Git。然后运行 `npx.cmd supabase config push --yes` 推送 `supabase/config.toml` 中的 6 位验证码、10 分钟有效期和 `supabase/templates/` 内的注册/找回密码模板。启用邮箱验证；Redirect URLs 保留普通 App 与后台 `https://admin.yeecc.cn/`。
 5. 使用 Supabase CLI 登录、关联项目，并部署四个 Edge Function：
 
 ```bash

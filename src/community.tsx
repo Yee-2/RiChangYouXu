@@ -181,7 +181,7 @@ function AuthCard({ onMessage, onAuthenticated, initialLoginMethod = 'password' 
         onAuthenticated?.();
       } else {
         if (!codeSent) throw new Error('请先发送邮箱验证码。');
-        if (!/^\d{8}$/.test(otp)) throw new Error('请输入邮件中的 8 位数字验证码。');
+        if (!/^\d{6}$/.test(otp)) throw new Error('请输入邮件中的 6 位数字验证码。');
         if ((mode === 'reset' || mode === 'signup') && !isValidAccountPassword(password)) throw new Error(accountPasswordRule);
         if (mode === 'signup' && password !== confirmPassword) throw new Error('两次输入的密码不一致。');
         const type = mode === 'signup' ? 'signup' : mode === 'reset' ? 'recovery' : 'email';
@@ -207,7 +207,7 @@ function AuthCard({ onMessage, onAuthenticated, initialLoginMethod = 'password' 
     setMode(next); setPassword(''); setConfirmPassword(''); setLoginMethod('password'); clearCode();
   };
   const emailLocked = codeSent && mode !== 'login' || (codeSent && loginMethod === 'otp');
-  const codeRow = (label: string, sendLabel: string) => <label className="auth-field"><span>{label}</span><span className="otp-input-row"><input className="otp-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="8 位验证码" required /><button className="soft-button otp-send-button" type="button" disabled={busy || resendSeconds > 0} onClick={() => void sendCode()}>{resendSeconds > 0 ? `${resendSeconds}s` : codeSent ? '重新发送' : sendLabel}</button></span></label>;
+  const codeRow = (label: string, sendLabel: string) => <label className="auth-field"><span>{label}</span><span className="otp-input-row"><input className="otp-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6 位验证码" required /><button className="soft-button otp-send-button" type="button" disabled={busy || resendSeconds > 0} onClick={() => void sendCode()}>{resendSeconds > 0 ? `${resendSeconds}s` : codeSent ? '重新发送' : sendLabel}</button></span></label>;
 
   return <section className="auth-card auth-card-stack"><div className="auth-card-intro"><p className="eyebrow">日常有序账号</p><h2>{mode === 'login' ? '登录后继续' : mode === 'signup' ? '创建邮箱账号' : '重置密码'}</h2><p>{mode === 'signup' ? '填写账号信息，验证邮箱后立即注册。' : mode === 'reset' ? '使用邮箱验证码验证后设置新密码。' : '选择适合你的登录方式。'}</p></div>
     {mode === 'login' && <div className="login-method-tabs" role="tablist" aria-label="登录方式"><button type="button" role="tab" aria-selected={loginMethod === 'password'} className={loginMethod === 'password' ? 'active' : ''} onClick={() => { setLoginMethod('password'); clearCode(); }}>密码登录</button><button type="button" role="tab" aria-selected={loginMethod === 'otp'} className={loginMethod === 'otp' ? 'active' : ''} onClick={() => { setLoginMethod('otp'); clearCode(); }}>验证码登录</button></div>}
@@ -563,7 +563,7 @@ export function PasswordChangePage({ session, onMessage, onComplete }: { session
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!supabase || busy) return;
     if (!codeSent) { onMessage('请先发送验证码。'); return; }
-    if (!/^\d{8}$/.test(otp)) { onMessage('请输入邮件中的 8 位数字验证码。'); return; }
+    if (!/^\d{6}$/.test(otp)) { onMessage('请输入邮件中的 6 位数字验证码。'); return; }
     if (!isValidAccountPassword(password)) { onMessage(accountPasswordRule); return; }
     setBusy(true);
     try {
@@ -576,7 +576,7 @@ export function PasswordChangePage({ session, onMessage, onComplete }: { session
     } catch (cause) { onMessage(cause instanceof Error ? cause.message : '密码修改失败，请重试。'); }
     finally { setBusy(false); }
   };
-  return <section className="surface-card settings-form-card"><div className="settings-form-heading"><span className="eyebrow">ACCOUNT SECURITY</span><h2>修改密码</h2><p>输入账号邮箱并验证邮件中的一次性验证码。</p></div><form className="account-edit-form" onSubmit={(event) => void submit(event)}><label className="auth-field"><span>账号</span><input value={maskEmail(accountEmail)} readOnly aria-label="当前账号邮箱" /></label><label className="auth-field"><span>邮箱验证码</span><span className="otp-input-row"><input className="otp-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="8 位验证码" required /><button className="soft-button otp-send-button" type="button" onClick={() => void sendCode()} disabled={busy || resendSeconds > 0}>{resendSeconds > 0 ? String(resendSeconds) + 's' : codeSent ? '重新发送' : '发送验证码'}</button></span></label><label className="auth-field"><span>新密码</span><input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8 位以上，含字母和数字" required /></label><button className="primary-button auth-submit" disabled={busy}>{busy ? '正在提交…' : '确认修改密码'}</button></form></section>;
+  return <section className="surface-card settings-form-card"><div className="settings-form-heading"><span className="eyebrow">ACCOUNT SECURITY</span><h2>修改密码</h2><p>输入账号邮箱并验证邮件中的一次性验证码。</p></div><form className="account-edit-form" onSubmit={(event) => void submit(event)}><label className="auth-field"><span>账号</span><input value={maskEmail(accountEmail)} readOnly aria-label="当前账号邮箱" /></label><label className="auth-field"><span>邮箱验证码</span><span className="otp-input-row"><input className="otp-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6 位验证码" required /><button className="soft-button otp-send-button" type="button" onClick={() => void sendCode()} disabled={busy || resendSeconds > 0}>{resendSeconds > 0 ? String(resendSeconds) + 's' : codeSent ? '重新发送' : '发送验证码'}</button></span></label><label className="auth-field"><span>新密码</span><input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8 位以上，含字母和数字" required /></label><button className="primary-button auth-submit" disabled={busy}>{busy ? '正在提交…' : '确认修改密码'}</button></form></section>;
 }
 
 export function DeleteAccountPage({ onMessage, onComplete }: { onMessage: (message: string) => void; onComplete: () => void }) {
