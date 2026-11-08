@@ -424,6 +424,7 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
   const [parentImages, setParentImages] = useState<string[]>([]);
   const [detailLoading, setDetailLoading] = useState(true);
   const [recordAvailable, setRecordAvailable] = useState(false);
+  const [mediaReady, setMediaReady] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [pendingKind, setPendingKind] = useState<'hide' | 'remove' | 'restore' | null>(null);
 
@@ -431,6 +432,7 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
     let active = true;
     void (async () => {
       setDetailLoading(true); setDetailError('');
+      setMediaReady(false);
       try {
         if (!supabase) throw new Error('社区服务暂不可用。');
         const table = item.target_type === 'post' ? 'posts' : 'comments';
@@ -463,10 +465,14 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
         }
 
         let nextImages: string[] = [];
+        let allMediaReadable = true;
         if (latestItem.image_paths.length) {
           const { data: signed, error: imageError } = await supabase.storage.from('community-media').createSignedUrls(latestItem.image_paths, 1800);
-          if (imageError) setDetailError(`部分图片暂时无法读取：${imageError.message}`);
-          else nextImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
+          if (imageError) { setDetailError(`部分图片暂时无法读取：${imageError.message}`); allMediaReadable = false; }
+          else {
+            nextImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
+            if (nextImages.length !== latestItem.image_paths.length) { setDetailError('部分图片暂时无法读取，请刷新后重试。'); allMediaReadable = false; }
+          }
         }
 
         let nextParentPost: ContentRow | null = null;
@@ -478,15 +484,24 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
             nextParentPost = { ...parent, target_type: 'post' } as ContentRow;
             if (nextParentPost.image_paths.length) {
               const { data: signed, error: parentImageError } = await supabase.storage.from('community-media').createSignedUrls(nextParentPost.image_paths, 1800);
-              if (parentImageError) setDetailError(`关联动态图片暂时无法读取：${parentImageError.message}`);
-              else nextParentImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
+              if (parentImageError) { setDetailError(`关联动态图片暂时无法读取：${parentImageError.message}`); allMediaReadable = false; }
+              else {
+                nextParentImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
+                if (nextParentImages.length !== nextParentPost.image_paths.length) { setDetailError('关联动态的部分图片暂时无法读取，请刷新后重试。'); allMediaReadable = false; }
+              }
             }
+          } else {
+            setDetailError('所属动态暂时无法读取，无法完整检查这条评论。');
+            allMediaReadable = false;
           }
+        } else if (latestItem.target_type === 'comment') {
+          setDetailError('评论缺少所属动态信息，无法完整检查。');
+          allMediaReadable = false;
         }
 
-        if (active) { setAuthor(nextAuthor); setImages(nextImages); setParentPost(nextParentPost); setParentImages(nextParentImages); }
+        if (active) { setAuthor(nextAuthor); setImages(nextImages); setParentPost(nextParentPost); setParentImages(nextParentImages); setMediaReady(allMediaReadable); }
       } catch (cause) {
-        if (active) { setRecordAvailable(false); setDetailError(cause instanceof Error ? cause.message : '内容详情暂时无法读取。'); }
+        if (active) { setRecordAvailable(false); setMediaReady(false); setDetailError(cause instanceof Error ? cause.message : '内容详情暂时无法读取。'); }
       } finally {
         if (active) setDetailLoading(false);
       }
@@ -510,7 +525,7 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
       <section className="content-detail-section"><h3>发布内容</h3><p className="content-detail-body">{detailItem.body || '（纯图片内容）'}</p>{images.length > 0 && <div className="content-detail-images">{images.map((url, index) => <a href={url} target="_blank" rel="noreferrer" key={`${url}-${index}`}><img src={url} alt={`内容图片 ${index + 1}`} /></a>)}</div>}</section>
       {parentPost && <section className="content-detail-section parent-post-preview"><h3>所属动态内容</h3><small>{contentStatus(parentPost.moderation_status)} · {formatDate(parentPost.created_at)} · ID {parentPost.id}</small><p className="content-detail-body">{parentPost.body || '（纯图片动态）'}</p>{parentImages.length > 0 && <div className="content-detail-images">{parentImages.map((url, index) => <a href={url} target="_blank" rel="noreferrer" key={`${url}-${index}`}><img src={url} alt={`关联动态图片 ${index + 1}`} /></a>)}</div>}</section>}
       {detailLoading && <p className="muted">正在读取最新内容、作者和图片信息…</p>}{detailError && <p className="form-error" role="alert">{detailError}</p>}
-      <footer className="content-detail-actions">{detailItem.moderation_status !== 'removed' ? <>{detailItem.moderation_status === 'visible' ? <button type="button" className="soft-button" disabled={!recordAvailable || detailLoading} onClick={() => setPendingKind('hide')}>隐藏内容</button> : <button type="button" className="primary-button compact" disabled={!recordAvailable || detailLoading} onClick={() => setPendingKind('restore')}>恢复内容</button>}<button type="button" className="danger-button" disabled={!recordAvailable || detailLoading} onClick={() => setPendingKind('remove')}>删除内容</button></> : <span className="muted">此内容已删除</span>}</footer>
+      <footer className="content-detail-actions">{detailItem.moderation_status !== 'removed' ? <>{detailItem.moderation_status === 'visible' ? <button type="button" className="soft-button" disabled={!recordAvailable || !mediaReady || detailLoading} onClick={() => setPendingKind('hide')}>隐藏内容</button> : <button type="button" className="primary-button compact" disabled={!recordAvailable || !mediaReady || detailLoading} onClick={() => setPendingKind('restore')}>恢复内容</button>}<button type="button" className="danger-button" disabled={!recordAvailable || !mediaReady || detailLoading} onClick={() => setPendingKind('remove')}>删除内容</button></> : <span className="muted">此内容已删除</span>}</footer>
     </section>
     {pendingKind && <ModerationConfirmDialog kind={pendingKind} itemLabel={contentLabel} onClose={() => setPendingKind(null)} onConfirm={async (reason) => { await onPerform(action, detailItem.target_type, detailItem.id, undefined, reason); setPendingKind(null); onClose(); }} />}
   </div>;
