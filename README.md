@@ -54,4 +54,4 @@ npm run preview
 
 手动发布时，在项目目录完成 `npx wrangler login`，然后执行 `npm run build` 和 `npx wrangler deploy`。
 
-部署细节见 [产品使用与部署指南](docs/product-guide.md)，接口见 [接口文档](docs/api.md)。隐私、服务协议和社区规范目前是运营草稿，公开上线前需要填写真实运营主体、联系方式和服务商信息。
+完整需求见 [项目需求规格说明书](docs/project-requirements.md)，部署细节见 [产品使用与部署指南](docs/product-guide.md)，接口见 [接口文档](docs/api.md)。隐私、服务协议和社区规范目前是运营草稿，公开上线前需要填写真实运营主体、联系方式和服务商信息。
