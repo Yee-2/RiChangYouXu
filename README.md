@@ -15,10 +15,10 @@ npm run dev
 
 ## 启用社区
 
-1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 中的迁移。已执行旧迁移的项目只补执行尚未应用的迁移，包括 `20261108095834_separate_admin_accounts_and_filters.sql` 和 `20261108103440_align_admin_filters_and_audit.sql`。
+1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 中的迁移。已执行旧迁移的项目只补执行尚未应用的迁移，包括 `20261108125637_add_report_review_reason.sql`、`20261108132208_random_profile_names_password_status.sql` 和 `20261108141538_fix_legacy_admin_rpc_and_default_names.sql`。
 2. 复制 `.env.example` 为 `.env.local`，填入 Project URL 和 anon/publishable key。
 3. 部署 Edge Functions：`admin-moderate`、`admin-manage`、`delete-account` 与 `delete-content`。PowerShell 请在项目目录使用 `npx.cmd`（避免执行策略拦截 `npx.ps1`）：依次执行 `npx.cmd supabase login`、`npx.cmd supabase link --project-ref obyqyzgycivgituobdzm`，再对四个函数分别执行 `npx.cmd supabase functions deploy <function-name> --use-api`。本配置已启用 JWT 校验；`--use-api` 部署不需要本地 Docker。
-4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs，加入后台地址 `https://admin.yeecc.cn/`。在 Authentication → SMTP Settings 配置 Resend SMTP：`smtp.resend.com:465`、用户名 `resend`、发件人 `no-reply@yeecc.cn`，密码使用 Resend API key。然后运行 `npx.cmd supabase config push --yes` 推送 8 位、10 分钟验证码设置和邮件模板；SMTP 密码由 Auth SMTP 设置保管，不提交到 Git。
+4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs，加入后台地址 `https://admin.yeecc.cn/`。在 Authentication → SMTP Settings 配置 Resend SMTP：`smtp.resend.com:465`、用户名 `resend`、发件人 `no-reply@yeecc.cn`，密码使用 Resend API key。然后运行 `npx.cmd supabase config push --yes` 推送 6 位、10 分钟验证码设置和邮件模板；SMTP 密码由 Auth SMTP 设置保管，不提交到 Git。
 5. 在 Cloudflare 将 `admin.yeecc.cn` 作为现有 `richangyouxu` Worker 的另一个 Custom Domain 绑定。
 6. 首次管理员先正常注册并验证邮箱，再由项目拥有者在 SQL Editor 执行：
 

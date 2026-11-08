@@ -15,12 +15,22 @@ verify_jwt = true
 [auth]
 additional_redirect_urls = ["https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/", "http://localhost:5173/admin", "http://127.0.0.1:5173/admin"]
 site_url = "https://daily.yeecc.cn"
+password_requirements = "letters_digits"
+enable_leaked_password_protection = true
+
+[auth.rate_limit]
+email_sent = 1000
 
 [auth.email]
 enable_confirmations = true
 max_frequency = "1m0s"
 otp_length = 6
 otp_expiry = 600
+double_confirm_changes = false
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "您的密码已被修改"
 
 [auth.email.smtp]
 enabled = true

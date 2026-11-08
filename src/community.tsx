@@ -3,8 +3,9 @@ import type { Session } from '@supabase/supabase-js';
 import { communityConfigured, supabase } from './supabase';
 import { Icon } from './Icon';
 import { useDismissibleDetails } from './useDismissibleDetails';
+import { accountPasswordRule, isValidAccountPassword } from './authValidation';
 
-export type Profile = { id: string; uid: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'banned' | 'deleted'; suspension_expires_at?: string | null };
+export type Profile = { id: string; uid?: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'banned' | 'deleted'; suspension_expires_at?: string | null };
 type Topic = { id: string; slug: string; title: string };
 type Post = { id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; topics?: Topic[]; liked?: boolean; followed?: boolean; likes?: number; comments?: CommentItem[]; images?: string[] };
 type CommentItem = { id: string; post_id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; images?: string[] };
@@ -23,7 +24,7 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
 
   const loadProfile = useCallback(async () => {
     if (!supabase || !session?.user) { setProfile(null); return; }
-    const { data, error: profileError } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
+    const { data, error: profileError } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
     if (profileError) { setError(profileError.message); return; }
     const value = data as Profile | null;
     if (value?.avatar_path) {
@@ -58,7 +59,7 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
       const list = (rawPosts ?? []) as Post[];
       const ids = list.map((post) => post.id); const authors = [...new Set(list.map((post) => post.author_id))];
       const [profileResult, topicResult, likeResult, commentResult, followResult] = await Promise.all([
-        authors.length ? supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', authors) : Promise.resolve({ data: [], error: null }),
+        authors.length ? supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', authors) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('post_topics').select('post_id,topics(id,slug,title)').in('post_id', ids) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('post_likes').select('post_id,user_id').in('post_id', ids) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('comments').select('id,post_id,author_id,body,image_paths,created_at,moderation_status').or(session?.user.id ? `moderation_status.eq.visible,and(author_id.eq.${session.user.id},moderation_status.eq.hidden)` : 'moderation_status.eq.visible').in('post_id', ids).order('created_at', { ascending: true }) : Promise.resolve({ data: [], error: null }),
@@ -73,7 +74,7 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
       }
       const likes = likeResult.data ?? []; const comments = (commentResult.data ?? []) as CommentItem[]; const followed = new Set((followResult.data ?? []).map((item) => item.followee_id as string));
       const commentAuthors = [...new Set(comments.map((comment) => comment.author_id))];
-      const commentProfiles = commentAuthors.length ? await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', commentAuthors) : { data: [], error: null };
+      const commentProfiles = commentAuthors.length ? await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', commentAuthors) : { data: [], error: null };
       if (commentProfiles.error) throw commentProfiles.error;
       for (const item of (commentProfiles.data ?? []) as Profile[]) people.set(item.id, item);
       const signedPaths = [...new Set([...list.flatMap((post) => post.image_paths), ...comments.flatMap((comment) => comment.image_paths), ...[...people.values()].map((person) => person.avatar_path).filter((path): path is string => Boolean(path))])];
@@ -129,9 +130,6 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
   </div>;
 }
 
-const isValidAccountPassword = (value: string) => value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value);
-const accountPasswordRule = '密码至少 8 位，并包含至少 1 个英文字母和 1 个数字。';
-
 function AuthCard({ onMessage, onAuthenticated, initialLoginMethod = 'password' }: { onMessage?: (message: string) => void; onAuthenticated?: () => void; initialLoginMethod?: 'password' | 'otp' }) {
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
   const [loginMethod, setLoginMethod] = useState<'password' | 'otp'>(initialLoginMethod);
@@ -162,7 +160,7 @@ function AuthCard({ onMessage, onAuthenticated, initialLoginMethod = 'password' 
       } else if (mode === 'reset') {
         result = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo: `${window.location.origin}/` });
       } else {
-        result = await supabase.auth.signInWithOtp({ email: normalizedEmail, options: { shouldCreateUser: false } });
+        result = await supabase.auth.signInWithOtp({ email: normalizedEmail, options: { shouldCreateUser: true } });
       }
       if (result.error) throw result.error;
       setCodeSent(true); startResendCooldown();
@@ -197,7 +195,7 @@ function AuthCard({ onMessage, onAuthenticated, initialLoginMethod = 'password' 
         } else if (mode === 'signup') {
           setMessage('注册完成，欢迎加入日常有序。'); onMessage?.('注册成功'); onAuthenticated?.();
         } else {
-          onMessage?.('登录成功'); onAuthenticated?.();
+          onMessage?.('验证码登录/注册成功'); onAuthenticated?.();
         }
       }
     } catch (cause) { reportFailure(cause); }
@@ -219,8 +217,8 @@ function AuthCard({ onMessage, onAuthenticated, initialLoginMethod = 'password' 
       {mode === 'signup' && <>{codeRow('邮箱验证码', '发送验证码')}<label className="auth-field"><span>设置密码</span><input type="password" autoComplete="new-password" minLength={8} placeholder="8 位以上，含字母和数字" value={password} onChange={(event) => setPassword(event.target.value)} readOnly={codeSent} required /></label><label className="auth-field"><span>确认密码</span><input type="password" autoComplete="new-password" minLength={8} placeholder="再次输入密码" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} readOnly={codeSent} required /></label>{codeSent && <button type="button" className="text-button change-auth-email" onClick={clearCode}>更改账号或密码</button>}</>}
       {mode === 'reset' && <>{codeRow('邮箱验证码', '发送验证码')}{codeSent && <button type="button" className="text-button change-auth-email" onClick={clearCode}>更换邮箱</button>}<label className="auth-field"><span>新密码</span><input type="password" autoComplete="new-password" minLength={8} placeholder="8 位以上，含字母和数字" value={password} onChange={(event) => setPassword(event.target.value)} required /></label></>}
       {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}
-      <button className="primary-button auth-submit" disabled={busy || ((mode === 'signup' || mode === 'reset' || loginMethod === 'otp') && !codeSent)}>{busy ? '请稍候…' : mode === 'signup' ? '立即注册' : mode === 'reset' ? '确认修改密码' : loginMethod === 'otp' ? '验证码登录' : '密码登录'}</button>
-      <div className="auth-switch">{mode === 'login' ? <>{loginMethod === 'password' && <button type="button" onClick={() => changeMode('reset')}>忘记密码</button>}<button type="button" onClick={() => changeMode('signup')}>立即注册</button></> : <button type="button" onClick={() => changeMode('login')}>返回登录</button>}</div>
+      <button className="primary-button auth-submit" disabled={busy || ((mode === 'signup' || mode === 'reset' || loginMethod === 'otp') && !codeSent)}>{busy ? '请稍候…' : mode === 'signup' ? '立即注册' : mode === 'reset' ? '确认修改密码' : loginMethod === 'otp' ? '验证码登录 / 注册' : '密码登录'}</button>
+      <div className="auth-switch">{mode === 'login' ? <>{loginMethod === 'password' ? <><button type="button" onClick={() => changeMode('reset')}>忘记密码</button><button type="button" onClick={() => changeMode('signup')}>立即注册</button></> : null}</> : <button type="button" onClick={() => changeMode('login')}>返回登录</button>}</div>
     </form>
   </section>;
 }
@@ -252,7 +250,7 @@ function PublicProfileHeader({ userId, session, ownId, onError, onOpenMy }: { us
     void (async () => {
       setLoading(true);
       const [profileResult, followerResult, followingResult, relationship] = await Promise.all([
-        supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', userId).maybeSingle(),
+        supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', userId).maybeSingle(),
         supabase.from('follows').select('follower_id', { count: 'exact', head: true }).eq('followee_id', userId),
         supabase.from('follows').select('followee_id', { count: 'exact', head: true }).eq('follower_id', userId),
         session ? supabase.from('follows').select('follower_id').eq('follower_id', session.user.id).eq('followee_id', userId).maybeSingle() : Promise.resolve({ data: null, error: null })
@@ -286,7 +284,7 @@ function PublicProfileHeader({ userId, session, ownId, onError, onOpenMy }: { us
   };
   if (loading) return <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在加载用户主页…</div>;
   if (!profile) return <div className="feed-empty"><Icon name="person_off" /><h3>找不到这个用户</h3><p>账号可能已注销或资料暂不可用。</p></div>;
-  return <section className="public-profile-card"><div className="public-profile-avatar">{profile.avatar_url ? <img src={profile.avatar_url} alt={`${profile.display_name}的头像`} /> : <Icon name="person" size={38} />}</div><div className="public-profile-info"><p className="eyebrow">COMMUNITY MEMBER</p><h1>{profile.display_name}</h1><small>UID：{profile.uid} · @{profile.username ?? '未设置用户名'}</small><p>{profile.bio || '这个用户还没有填写简介。'}</p><div className="public-profile-stats"><span><b>{followers}</b> 关注者</span><span><b>{following}</b> 正在关注</span></div></div><div className="public-profile-actions">{ownProfile ? <button className="soft-button" onClick={onOpenMy}><Icon name="edit" />我的账号设置</button> : <>{session && <button className="primary-button compact" onClick={() => void toggleFollow()}><Icon name={isFollowing ? 'person_check' : 'person_add'} />{isFollowing ? '已关注' : '关注'}</button>}{session && <button className="soft-button" onClick={() => void report()}><Icon name="flag" />举报账号</button>}</>}</div></section>;
+  return <section className="public-profile-card"><div className="public-profile-avatar">{profile.avatar_url ? <img src={profile.avatar_url} alt={`${profile.display_name}的头像`} /> : <Icon name="person" size={38} />}</div><div className="public-profile-info"><p className="eyebrow">COMMUNITY MEMBER</p><h1>{profile.display_name}</h1><small>@{profile.username ?? '未设置用户名'}</small><p>{profile.bio || '这个用户还没有填写简介。'}</p><div className="public-profile-stats"><span><b>{followers}</b> 关注者</span><span><b>{following}</b> 正在关注</span></div></div><div className="public-profile-actions">{ownProfile ? <button className="soft-button" onClick={onOpenMy}><Icon name="edit" />我的账号设置</button> : <>{session && <button className="primary-button compact" onClick={() => void toggleFollow()}><Icon name={isFollowing ? 'person_check' : 'person_add'} />{isFollowing ? '已关注' : '关注'}</button>}{session && <button className="soft-button" onClick={() => void report()}><Icon name="flag" />举报账号</button>}</>}</div></section>;
 }
 
 export function FollowingPage({ session, onBack, onOpenProfile, onMessage }: { session: Session; onBack: () => void; onOpenProfile: (userId: string) => void; onMessage: (message: string) => void }) {
@@ -310,7 +308,7 @@ export function FollowingPage({ session, onBack, onOpenProfile, onMessage }: { s
     const ids = (relations ?? []).map((item) => item.followee_id as string);
     setFollowingCount(count ?? 0); setHasMore(ids.length === 100); setNextOffset(offset + ids.length);
     if (!ids.length) { if (!append) setPeople([]); setLoading(false); setLoadingMore(false); return; }
-    const { data: rows, error: profileError } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', ids).neq('account_status', 'deleted');
+    const { data: rows, error: profileError } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', ids).neq('account_status', 'deleted');
     if (profileError) { setError(profileError.message); setLoading(false); setLoadingMore(false); return; }
     const profiles = (rows ?? []) as Profile[];
     const paths = [...new Set(profiles.map((item) => item.avatar_path).filter((path): path is string => Boolean(path)))];
@@ -342,7 +340,7 @@ export function FollowingPage({ session, onBack, onOpenProfile, onMessage }: { s
     <div className="page-title-row"><div><p className="eyebrow">PEOPLE YOU FOLLOW</p><h1>我的关注</h1></div><span className="profile-count-chip">{followingCount} 位</span></div>
     {error && <div className="community-alert" role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></div>}
     {loading ? <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在读取关注列表…</div> : people.length ? <><div className="following-list">{people.map((person) => <div key={person.id} className={`following-row ${revealedId === person.id ? 'revealed' : ''}`} onTouchStart={(event) => { touchStartX.current = event.changedTouches[0]?.clientX ?? null; }} onTouchEnd={(event) => { const start = touchStartX.current; const end = event.changedTouches[0]?.clientX; touchStartX.current = null; if (start === null || end === undefined) return; const delta = end - start; if (delta > 42) { setRevealedId(person.id); suppressClickUntil.current = Date.now() + 450; } else if (delta < -42) setRevealedId(null); }}>
-      <button type="button" className="following-person" onClick={() => { if (Date.now() < suppressClickUntil.current) return; onOpenProfile(person.id); }}><span className="following-avatar">{person.avatar_url ? <img src={person.avatar_url} alt="" /> : <Icon name="person" />}</span><span className="following-copy"><b>{person.display_name}</b><small>UID：{person.uid}</small></span><Icon name="chevron_right" className="following-chevron" /></button>
+      <button type="button" className="following-person" onClick={() => { if (Date.now() < suppressClickUntil.current) return; onOpenProfile(person.id); }}><span className="following-avatar">{person.avatar_url ? <img src={person.avatar_url} alt="" /> : <Icon name="person" />}</span><span className="following-copy"><b>{person.display_name}</b>{person.username && <small>@{person.username}</small>}</span><Icon name="chevron_right" className="following-chevron" /></button>
       <button type="button" className="following-more" aria-label={`显示 ${person.display_name} 的关注操作`} aria-expanded={revealedId === person.id} onClick={() => setRevealedId((current) => current === person.id ? null : person.id)}><Icon name="more_horiz" /></button>
       {revealedId === person.id && <button type="button" className="following-unfollow" disabled={busyId === person.id} onClick={() => void unfollow(person)}>{busyId === person.id ? '处理中…' : '取消关注'}</button>}
     </div>)}</div>{hasMore && <button className="load-more-button" disabled={loadingMore} onClick={() => void load(true, nextOffset)}>{loadingMore ? '加载中…' : '加载更多关注'}</button>}</> : <div className="feed-empty"><Icon name="person_add" /><h3>还没有关注的人</h3><p>去社区看看，遇见喜欢的生活分享。</p></div>}
@@ -470,10 +468,16 @@ function PostActionsMenu({ isOwner, isHidden, onDelete, onReport }: { isOwner: b
 
 export function AccountSettings({ session, onMessage, onProfileChange, onNavigate }: { session: Session; onMessage: (message: string) => void; onProfileChange: (profile: Profile | null) => void; onNavigate: (page: 'edit-profile' | 'change-password' | 'delete-account' | 'logout') => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const loadProfile = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
+    const [{ data, error }, { data: authSettings, error: authSettingsError }] = await Promise.all([
+      supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle(),
+      supabase.from('user_auth_settings').select('password_set').eq('user_id', session.user.id).maybeSingle()
+    ]);
     if (error) { onMessage(error.message); return; }
+    if (authSettingsError) { onMessage(authSettingsError.message); setHasPassword(true); }
+    else setHasPassword(authSettings?.password_set ?? true);
     const value = data as Profile | null;
     if (value?.avatar_path) {
       const { data: signed, error: avatarError } = await supabase.storage.from('community-media').createSignedUrl(value.avatar_path, 3600);
@@ -492,7 +496,7 @@ export function AccountSettings({ session, onMessage, onProfileChange, onNavigat
   const accountStatus = profile ? effectiveProfileStatus(profile) : 'active';
   const rows = [
     { page: 'edit-profile' as const, icon: 'edit', title: '编辑个人资料', detail: '修改头像、昵称和个人简介' },
-    { page: 'change-password' as const, icon: 'key', title: '修改密码', detail: '通过邮箱验证码重设登录密码' },
+    { page: 'change-password' as const, icon: 'key', title: hasPassword === null ? '读取密码状态中…' : hasPassword ? '修改密码' : '设置密码', detail: hasPassword === null ? '正在确认账号状态' : hasPassword ? '通过邮箱验证码重设登录密码' : '为验证码登录账号设置密码' },
     { page: 'delete-account' as const, icon: 'delete_forever', title: '注销账号', detail: '删除社区账号及线上内容', danger: true },
     { page: 'logout' as const, icon: 'logout', title: '退出登录', detail: '退出此设备上的社区账号' }
   ];
@@ -504,8 +508,8 @@ export function AccountSettings({ session, onMessage, onProfileChange, onNavigat
   return <>
     <section className="account-settings">
       <div className="account-settings-heading"><div><p className="eyebrow">COMMUNITY ACCOUNT</p><h2>账号与安全</h2><p>管理个人资料和登录安全。</p></div><span className={'account-status-chip ' + accountStatus}>{statusLabel}</span></div>
-      <div className="account-summary-card"><span className="account-avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="" /> : <Icon name="person" />}</span><div className="account-summary-copy"><b>{profile?.display_name ?? '账号用户'}</b><small>UID：{profile?.uid ?? '加载中'}</small><small>{maskEmail(session.user.email)}</small></div></div>
-      <nav className="account-menu-list" aria-label="账号选项">{rows.map((row) => <button type="button" className={'settings-row account-menu-row' + (row.danger ? ' danger-row' : '')} key={row.page} disabled={!canEdit && (row.page === 'edit-profile' || row.page === 'change-password')} onClick={() => onNavigate(row.page)}><span className={'settings-icon' + (row.danger ? ' red' : '')}><Icon name={row.icon} /></span><span><b>{row.title}</b><small>{!canEdit && (row.page === 'edit-profile' || row.page === 'change-password') ? '当前账号状态下暂不可用' : row.detail}</small></span><Icon name="chevron_right" /></button>)}</nav>
+      <div className="account-summary-card"><span className="account-avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="" /> : <Icon name="person" />}</span><div className="account-summary-copy"><b>{profile?.display_name ?? '账号用户'}</b><small>{maskEmail(session.user.email)}</small></div></div>
+      <nav className="account-menu-list" aria-label="账号选项">{rows.map((row) => <button type="button" className={'settings-row account-menu-row' + (row.danger ? ' danger-row' : '')} key={row.page} disabled={(!canEdit && (row.page === 'edit-profile' || row.page === 'change-password')) || (row.page === 'change-password' && hasPassword === null)} onClick={() => onNavigate(row.page)}><span className={'settings-icon' + (row.danger ? ' red' : '')}><Icon name={row.icon} /></span><span><b>{row.title}</b><small>{!canEdit && (row.page === 'edit-profile' || row.page === 'change-password') ? '当前账号状态下暂不可用' : row.detail}</small></span><Icon name="chevron_right" /></button>)}</nav>
     </section>
     <MyReports session={session} />
   </>;
@@ -522,7 +526,7 @@ export function ProfileEditPage({ session, onMessage, onProfileChange, onComplet
     let active = true;
     void (async () => {
       if (!supabase) return;
-      const { data, error } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
+      const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
       if (error) { onMessage(error.message); return; }
       const value = data as Profile | null;
       if (value?.avatar_path) {
@@ -569,8 +573,19 @@ export function ProfileEditPage({ session, onMessage, onProfileChange, onComplet
 
 export function PasswordChangePage({ session, onMessage, onComplete }: { session: Session; onMessage: (message: string) => void; onComplete: () => void }) {
   const [otp, setOtp] = useState(''); const [password, setPassword] = useState(''); const [codeSent, setCodeSent] = useState(false); const [busy, setBusy] = useState(false);
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const { seconds: resendSeconds, start: startResendCooldown } = useOtpCooldown();
   const accountEmail = session.user.email ?? '';
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    void supabase.from('user_auth_settings').select('password_set').eq('user_id', session.user.id).maybeSingle().then(({ data, error }) => {
+      if (!active) return;
+      if (error) { onMessage(error.message); setHasPassword(true); return; }
+      setHasPassword(data?.password_set ?? true);
+    });
+    return () => { active = false; };
+  }, [session.user.id, onMessage]);
   const sendCode = async () => {
     if (!supabase || !accountEmail || busy || resendSeconds > 0) return;
     setBusy(true);
@@ -593,11 +608,12 @@ export function PasswordChangePage({ session, onMessage, onComplete }: { session
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
       await supabase.auth.signOut();
-      onMessage('密码修改完成，请重新登录'); onComplete();
+      onMessage(hasPassword ? '密码修改完成，请重新登录' : '密码设置完成，请重新登录'); onComplete();
     } catch (cause) { onMessage(cause instanceof Error ? cause.message : '密码修改失败，请重试。'); }
     finally { setBusy(false); }
   };
-  return <section className="surface-card settings-form-card"><div className="settings-form-heading"><span className="eyebrow">ACCOUNT SECURITY</span><h2>修改密码</h2><p>输入账号邮箱并验证邮件中的一次性验证码。</p></div><form className="account-edit-form" onSubmit={(event) => void submit(event)}><label className="auth-field"><span>账号</span><input value={maskEmail(accountEmail)} readOnly aria-label="当前账号邮箱" /></label><label className="auth-field"><span>邮箱验证码</span><span className="otp-input-row"><input className="otp-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6 位验证码" required /><button className="soft-button otp-send-button" type="button" onClick={() => void sendCode()} disabled={busy || resendSeconds > 0}>{resendSeconds > 0 ? String(resendSeconds) + 's' : codeSent ? '重新发送' : '发送验证码'}</button></span></label><label className="auth-field"><span>新密码</span><input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8 位以上，含字母和数字" required /></label><button className="primary-button auth-submit" disabled={busy}>{busy ? '正在提交…' : '确认修改密码'}</button></form></section>;
+  const title = hasPassword === null ? '账号密码' : hasPassword ? '修改密码' : '设置密码';
+  return <section className="surface-card settings-form-card"><div className="settings-form-heading"><span className="eyebrow">ACCOUNT SECURITY</span><h2>{title}</h2><p>输入账号邮箱并验证邮件中的一次性验证码。</p></div><form className="account-edit-form" onSubmit={(event) => void submit(event)}><label className="auth-field"><span>账号</span><input value={maskEmail(accountEmail)} readOnly aria-label="当前账号邮箱" /></label><label className="auth-field"><span>邮箱验证码</span><span className="otp-input-row"><input className="otp-code-input" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6 位验证码" required /><button className="soft-button otp-send-button" type="button" onClick={() => void sendCode()} disabled={busy || resendSeconds > 0}>{resendSeconds > 0 ? String(resendSeconds) + 's' : codeSent ? '重新发送' : '发送验证码'}</button></span></label><label className="auth-field"><span>新密码</span><input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8 位以上，含字母和数字" required /></label><button className="primary-button auth-submit" disabled={busy || hasPassword === null}>{busy ? '正在提交…' : hasPassword === false ? '确认设置密码' : '确认修改密码'}</button></form></section>;
 }
 
 export function DeleteAccountPage({ onMessage, onComplete }: { onMessage: (message: string) => void; onComplete: () => void }) {

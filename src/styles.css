@@ -115,3 +115,5 @@
 .my-report-review-reason b{color:var(--coral-dark)}
 .my-report-review-reason span{color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:640px){.content-detail-meta{align-items:flex-start;flex-direction:column;gap:7px}.content-detail-actions{bottom:-16px;margin:16px -16px -16px;padding:11px 16px}.content-detail-actions>*{flex:1;justify-content:center}}
+.today-completed-section{margin-top:20px}.today-completed-list{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface)}.today-completed-item{display:flex;align-items:center;gap:10px;min-height:48px;padding:10px 13px;border-bottom:1px solid var(--line);color:var(--green,#5aab69)}.today-completed-item:last-child{border-bottom:0}.today-completed-item span{flex:1;color:var(--text);font-size:13px}.today-completed-item small{color:var(--muted);font-size:11px}.completed-count{display:inline-grid;place-items:center;min-width:24px;height:24px;margin-left:4px;padding:0 6px;border-radius:99px;background:var(--surface-2);color:var(--coral-dark);font-size:13px;vertical-align:2px}
+@media(max-width:640px){.welcome-row h1 span{display:block;margin-top:2px}}

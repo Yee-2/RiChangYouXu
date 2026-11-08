@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useOtpCooldown } from './community';
 import { Icon } from './Icon';
 import { communityConfigured, supabase } from './supabase';
+import { accountPasswordRule, isValidAccountPassword } from './authValidation';
 
 type AuthMode = 'login' | 'forgot' | 'recover';
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -80,7 +81,7 @@ function AdminLogin({ mode, setMode, notice, setNotice }: { mode: AuthMode; setM
           setMessage('如果该邮箱对应可用管理员账号，验证码会很快送达。');
         } else {
           if (!/^\d{6}$/.test(otp)) throw new Error('请输入邮件中的 6 位数字验证码。');
-          if (password.length < 8) throw new Error('新密码至少需要 8 位。');
+          if (!isValidAccountPassword(password)) throw new Error(accountPasswordRule);
           if (password !== confirmPassword) throw new Error('两次输入的新密码不一致。');
           const { error: verifyError } = await supabase.auth.verifyOtp({ email, token: otp, type: 'recovery' });
           if (verifyError) throw verifyError;
@@ -148,7 +149,7 @@ function AdminPasswordRecovery({ onBack, hasSession }: { onBack: () => void; has
     event.preventDefault();
     if (!supabase || busy) return;
     if (!hasSession) { setError('重置链接已失效或不完整，请重新申请。'); return; }
-    if (password.length < 8) { setError('新密码至少需要 8 位。'); return; }
+    if (!isValidAccountPassword(password)) { setError(accountPasswordRule); return; }
     if (password !== confirm) { setError('两次输入的新密码不一致。'); return; }
     setBusy(true); setError('');
     const { error: updateError } = await supabase.auth.updateUser({ password });

@@ -119,7 +119,7 @@ Deno.serve(async (request) => {
     const targetId = typeof input.targetId === 'string' ? input.targetId : '';
     const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
     const newPassword = typeof input.newPassword === 'string' ? input.newPassword : '';
-    if (!isUuid(targetId) || targetId === actorProfile.id || !reason || reason.length > 500 || newPassword.length < 8 || newPassword.length > 128) {
+    if (!isUuid(targetId) || targetId === actorProfile.id || !reason || reason.length > 500 || !isValidPassword(newPassword)) {
       return response({ error: 'invalid_request' }, 400, cors);
     }
     const { data: targetAdmin, error: targetError } = await serviceClient
@@ -156,6 +156,10 @@ Deno.serve(async (request) => {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isValidPassword(value: string) {
+  return value.length >= 8 && value.length <= 128 && /[A-Za-z]/.test(value) && /\d/.test(value);
 }
 
 function mapDatabaseError(message: string) {

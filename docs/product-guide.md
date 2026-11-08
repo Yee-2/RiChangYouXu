@@ -19,11 +19,11 @@ npm run dev
 
 ### 首页与主题
 
-首页汇总今天待办、出门检查入口、最近抄表和宠物照护记录。顶部按钮在日间与夜间主题之间切换；首次访问跟随系统外观。主题选择保存在本机。
+首页问候语按设备本地时间显示早上、中午、下午、晚上或夜深提示；顶部按钮在日间与夜间主题之间切换，首次访问跟随系统外观。清单勾选完成时记录本地完成时间，首页按当天展示已完成事项和进度；主题选择保存在本机。
 
 ### 生活清单
 
-创建清单后可添加事项、截止日期和备注。事项完成情况自动保存。清单可改名、归档、恢复或删除；删除清单会同时删除它的事项。可以从旅行、搬家示例开始。
+创建清单后可添加事项、截止日期和备注。事项完成情况和完成时间自动保存；取消完成会清除本次完成时间。首页只把当天完成的事项计入当天进度。清单可改名、归档、恢复或删除；删除清单会同时删除它的事项。可以从旅行、搬家示例开始。
 
 ### 出门检查
 
@@ -39,13 +39,13 @@ npm run dev
 
 ### 社区
 
-登录页提供密码登录和验证码登录。验证码登录只允许已有账号使用，不会创建新账号。注册页和找回密码页均先发送 6 位邮箱验证码，再提交验证码和密码；新密码至少 8 位且包含英文字母和数字。验证码 10 分钟有效，每 60 秒可重新发送。验证邮件使用已验证的 `yeecc.cn` 发件域名，由 Supabase Auth 通过 Resend SMTP 投递。
+登录页提供密码登录和验证码登录。验证码登录同时支持登录和注册：新邮箱验证 6 位验证码后自动创建账号，不需要先进入单独注册页或设置密码；密码登录页仍可选择密码注册。新账号昵称由系统随机生成且不含 UID。忘记密码、设置密码和修改密码均使用 6 位邮箱验证码；新验证码账号在个人账号设置中显示“设置密码”，已有密码的账号显示“修改密码”。验证码 10 分钟有效，每 60 秒可重新发送。验证邮件使用已验证的 `yeecc.cn` 发件域名，由 Supabase Auth 通过 Resend SMTP 投递。
 
 验证邮箱后可发布文字和图片动态、添加 `#话题`、添加评论、表情、点赞、关注作者和举报内容。点击动态或评论作者可查看公开主页、简介、动态与关注数据，也可关注/取消关注或举报账号。动态图片最多 9 张，单张 5 MB；评论图片最多 4 张。删除自己的动态或评论时会先隐藏内容，再通过服务端清理关联图片；如果图片清理失败，内容会保持隐藏并提示重试。删除账号会永久删除线上社区内容和媒体，但保留本机生活记录。
 
 在“我的举报”中可查看每条举报的处理状态。被驳回的举报会显示管理员填写的驳回理由；仅举报人本人和管理员可以读取这项理由。
 
-登录后可编辑社区昵称、个人简介和头像。每个账号有系统生成的短 UID；新用户昵称由系统随机生成，也可以自行修改。头像支持 JPG、PNG、WebP，单张不超过 2 MB；保存成功后会显示在个人资料、动态和评论旁。公开主页显示 UID，不显示邮箱。“我的 → 账号设置”显示本人邮箱的掩码形式；编辑资料、修改密码、注销账号和退出登录分别进入独立页面。修改密码填写账号邮箱、验证码和新密码；修改完成后会退出当前会话并返回密码登录页，需要重新登录。忘记密码也使用同样的验证码流程。
+登录后可编辑社区昵称、个人简介和头像。系统为每个账号生成唯一 UID，供后台按 UID 或邮箱查找；普通用户页面不显示或请求 UID，也不显示他人的真实邮箱。“我的 → 账号设置”显示本人邮箱的掩码形式；编辑资料、设置/修改密码、注销账号和退出登录分别进入独立页面。设置或修改密码时填写账号邮箱、验证码和新密码；完成后会退出当前会话并返回登录页，需要重新登录。忘记密码也使用同样的验证码流程。
 
 ### 管理后台
 
@@ -64,7 +64,7 @@ npm run dev
 ## 启用 Supabase 社区
 
 1. 创建 Supabase 项目。
-2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql` 和 `supabase/migrations/20261108125637_add_report_review_reason.sql`。已执行的旧迁移不要重跑，只补执行尚未应用的迁移。
+2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`、`supabase/migrations/20261108125637_add_report_review_reason.sql`、`supabase/migrations/20261108132208_random_profile_names_password_status.sql` 和 `supabase/migrations/20261108141538_fix_legacy_admin_rpc_and_default_names.sql`。已执行的旧迁移不要重跑，只补执行尚未应用的迁移。
 3. 复制 `.env.example` 到 `.env.local`，填入 Project URL 与 anon/publishable key。
 4. 在 Supabase Dashboard 的 Authentication → SMTP Settings 配置自定义 SMTP：主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`，密码使用 Resend API key。密钥只保存在 Supabase Auth SMTP 配置中，不能放入公开前端变量或 Git。然后运行 `npx.cmd supabase config push --yes` 推送 `supabase/config.toml` 中的 6 位验证码、10 分钟有效期和 `supabase/templates/` 内的注册/找回密码模板。启用邮箱验证；Redirect URLs 保留普通 App 与后台 `https://admin.yeecc.cn/`。
 5. 使用 Supabase CLI 登录、关联项目，并部署四个 Edge Function：

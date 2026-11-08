@@ -2,7 +2,7 @@
 
 版本：0.1.0  
 后端：Supabase Auth、PostgREST、Storage、Edge Functions  
-迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`、`supabase/migrations/20261108125637_add_report_review_reason.sql`
+迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`、`supabase/migrations/20261108125637_add_report_review_reason.sql`、`supabase/migrations/20261108132208_random_profile_names_password_status.sql`、`supabase/migrations/20261108141538_fix_legacy_admin_rpc_and_default_names.sql`
 
 ## 连接与鉴权
 
@@ -19,11 +19,11 @@
 |---|---|---|
 | 注册 | “发送验证码”按钮调用 `auth.signUp({ email, password })`；提交注册时调用 `auth.verifyOtp({ email, token, type: 'signup' })` | 注册页按邮箱、验证码、密码、确认密码排列；密码至少 8 位且包含英文字母和数字。验证前需先创建未验证账号以触发注册验证码。验证码 10 分钟有效，每 60 秒可重发 |
 | 密码登录 | `auth.signInWithPassword({ email, password })` | 仅已验证邮箱可正常登录 |
-| 验证码登录 | `auth.signInWithOtp({ email, options: { shouldCreateUser: false } })` 后调用 `auth.verifyOtp({ email, token, type: 'email' })` | 只允许已有账号登录，不会通过登录验证码自动注册；登录邮件使用 `magic_link` 模板发送数字验证码 |
+| 验证码登录/注册 | `auth.signInWithOtp({ email, options: { shouldCreateUser: true } })` 后调用 `auth.verifyOtp({ email, token, type: 'email' })` | 同一流程用于已有账号登录和新邮箱注册；Supabase Auth 自动判断并创建新用户，验证 6 位验证码后建立会话。验证码邮件使用 `magic_link` 模板 |
 | 退出 | `auth.signOut()` | 清除本机 Supabase 会话 |
 | 忘记密码 | `auth.resetPasswordForEmail(email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })` | 先验证 6 位邮箱验证码，再设置至少 8 位且包含英文字母和数字的新密码；验证码 10 分钟有效 |
-| 修改密码 | `auth.resetPasswordForEmail(session.user.email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })`、`auth.signOut()` | 账号设置页要求验证当前账号邮箱；新密码至少 8 位且包含英文字母和数字。成功后提示完成并返回密码登录页，需重新登录。管理员本人修改密码也使用验证码；管理员重置其他管理员密码仍由服务端 Auth Admin API 执行并记录原因 |
-| 重发验证码 | 注册调用 `auth.resend({ type: 'signup', email })`；验证码登录重复调用 `auth.signInWithOtp(...)`；密码恢复重复调用 `auth.resetPasswordForEmail(email)` | 页面显示 60 秒倒计时后允许重新发送，并提示发送成功或失败 |
+| 设置或修改密码 | `auth.resetPasswordForEmail(session.user.email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })`、`auth.signOut()` | 账号设置页按账号状态显示“设置密码”或“修改密码”；使用 6 位邮箱验证码，密码至少 8 位且包含英文字母和数字。完成后退出会话并返回登录页。管理员本人修改密码也使用验证码；管理员重置其他管理员密码仍由服务端 Auth Admin API 执行并记录原因 |
+| 重发验证码 | 验证码登录/注册重复调用 `auth.signInWithOtp(...)`；密码恢复重复调用 `auth.resetPasswordForEmail(email)`；密码注册重发调用 `auth.resend({ type: 'signup', email })` | 页面显示 60 秒倒计时后允许重新发送，并提示发送成功或失败 |
 
 管理员登录使用 Supabase Auth 邮箱账号，只能从 `https://admin.yeecc.cn/` 登录；后台不提供注册。管理员权限唯一来源为启用 RLS 的 `public.admin_accounts` 表，普通用户没有该表的读写权限；`profiles.role` 仅作兼容字段，不能单独授予后台权限。后台忘记密码用同一 Resend 邮件发送验证码，不使用密码重置链接；后台地址保留在 Supabase Authentication → URL Configuration 的 Redirect URLs 中，以兼容现有会话与历史链接。
 
@@ -84,7 +84,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 ### 用户资料
 
-`profiles` 可公开读取公开资料字段。`uid` 是数据库生成的 6 位纯数字公开 UID，唯一且创建后不可修改；`id` 仍是内部 Auth UUID 和关系外键。新账号昵称由数据库触发器随机生成，用户可自行修改。用户只可更新自己的 `username`、`display_name`、`avatar_path`、`bio`；角色、UID 和账号状态不能由客户端修改。邮箱不存进公开 profile 表，也不由社区 REST 查询返回。普通用户的个人设置页对本人邮箱做掩码；完整邮箱只由管理员后台调用 `admin-manage` 读取。资料编辑通过 `PATCH /rest/v1/profiles?id=eq.{auth-uuid}` 更新 `display_name`（1–40 字）、`bio`（最多 240 字）与 `avatar_path`。头像限 JPG/PNG/WebP、最大 2 MiB；先上传到 `{auth-uuid}/{uuid}.{ext}`，资料更新成功后才删除旧头像。失败时清理新文件并保留原资料。头像与 UID 为社区可见资料。
+`profiles.uid` 是数据库生成的 6 位纯数字 UID，唯一且创建后不可修改；它只供后台搜索和管理，普通用户端的资料查询不请求或展示 UID。`id` 是内部 Auth UUID 和关系外键。新账号昵称由数据库触发器随机生成，不包含 UID，用户可自行修改。用户只可更新自己的 `username`、`display_name`、`avatar_path`、`bio`；角色、UID 和账号状态不能由客户端修改。邮箱不存进公开 profile 表，也不由社区 REST 查询返回。普通用户的个人设置页对本人邮箱做掩码；完整邮箱只由管理员后台调用 `admin-manage` 读取。`user_auth_settings` 单独保存是否已设置密码，启用 RLS 且用户只能读取自己的状态。资料编辑通过 `PATCH /rest/v1/profiles?id=eq.{auth-uuid}` 更新 `display_name`（1–40 字）、`bio`（最多 240 字）与 `avatar_path`。头像限 JPG/PNG/WebP、最大 2 MiB；先上传到 `{auth-uuid}/{uuid}.{ext}`，资料更新成功后才删除旧头像。失败时清理新文件并保留原资料。
 
 ## Edge Functions
 
@@ -104,7 +104,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 { "action": "find_account", "lookup": "6 位 UID 或完整邮箱" }
 { "action": "grant_admin", "targetId": "auth-user-uuid", "reason": "职责需要" }
 { "action": "revoke_admin", "targetId": "auth-user-uuid", "reason": "权限调整" }
-{ "action": "reset_admin_password", "targetId": "auth-user-uuid", "newPassword": "至少 8 位", "reason": "凭据重置" }
+{ "action": "reset_admin_password", "targetId": "auth-user-uuid", "newPassword": "8-128 位且包含字母和数字", "reason": "凭据重置" }
 ```
 
 `verify` 的成功响应中，`actor` 包含管理员 `id`、公开 `uid`、`display_name`、完整 `email` 和 `avatar_path`：

@@ -15,6 +15,7 @@ export interface ChecklistItem {
   dueDate?: string;
   note?: string;
   done: boolean;
+  completedAt?: string;
   createdAt: string;
 }
 
