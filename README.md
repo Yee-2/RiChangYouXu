@@ -39,4 +39,12 @@ npm run build
 npm run preview
 ```
 
+## Cloudflare Worker 发布
+
+根目录 `wrangler.toml` 配置了 `daily.yeecc.cn` 与 `admin.yeecc.cn` 两个生产自定义域名，以及 `dist` 单页应用资源。
+
+连接 Cloudflare Workers Builds 后，生产分支设为 `main`、根目录设为 `/`，构建命令使用 `npm run build`，部署命令使用 `npx wrangler deploy`。Cloudflare 首次连接仓库时需要安装 GitHub App 并授权读取 `Yee-2/RiChangYouXu`；完成后推送 `main` 会发布两个域名共用的新前端。
+
+手动发布时，在项目目录完成 `npx wrangler login`，然后执行 `npm run build` 和 `npx wrangler deploy`。
+
 部署细节见 [产品使用与部署指南](docs/product-guide.md)，接口见 [接口文档](docs/api.md)。隐私、服务协议和社区规范目前是运营草稿，公开上线前需要填写真实运营主体、联系方式和服务商信息。
