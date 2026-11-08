@@ -18,6 +18,35 @@ type UserStatusFilter = 'all' | 'active' | 'suspended' | 'banned' | 'deleted';
 type RegistrationSort = 'newest' | 'oldest';
 type RegistrationWindow = 'all' | '7d' | '30d' | '90d';
 
+async function attachAvatarUrls<T extends Pick<AdminProfile, 'avatar_path' | 'account_status'>>(rows: T[]) {
+  const paths = [...new Set(rows
+    .filter((row) => row.account_status !== 'deleted')
+    .map((row) => row.avatar_path)
+    .filter((path): path is string => Boolean(path)))];
+
+  if (!supabase || !paths.length) {
+    return { rows: rows.map((row) => ({ ...row, avatar_url: undefined as string | undefined })) };
+  }
+
+  const { data, error } = await supabase.storage.from('community-media').createSignedUrls(paths, 3600);
+  if (error) {
+    return { rows: rows.map((row) => ({ ...row, avatar_url: undefined as string | undefined })), error: error.message };
+  }
+
+  const signedByPath = new Map<string, string>();
+  paths.forEach((path, index) => {
+    const url = data?.[index]?.signedUrl;
+    if (url) signedByPath.set(path, url);
+  });
+
+  return {
+    rows: rows.map((row) => ({
+      ...row,
+      avatar_url: row.account_status !== 'deleted' && row.avatar_path ? signedByPath.get(row.avatar_path) : undefined
+    }))
+  };
+}
+
 const sections: Array<{ id: AdminSection; label: string; icon: string }> = [
   { id: 'reports', label: '举报处理', icon: 'flag' },
   { id: 'content', label: '内容管理', icon: 'article' },
@@ -107,9 +136,18 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     const nextAudit = (auditResult.data ?? []) as AuditRow[];
     const nextPosts = (postResult.data ?? []) as Array<Omit<ContentRow, 'target_type'>>;
     const nextComments = (commentResult.data ?? []) as Array<Omit<ContentRow, 'target_type'>>;
-    setProfiles(nextProfiles);
-    setAccounts(nextAccounts);
-    setUsers(nextUsers);
+    const [profilesWithAvatars, accountsWithAvatars, usersWithAvatars] = await Promise.all([
+      attachAvatarUrls(nextProfiles),
+      attachAvatarUrls(nextAccounts),
+      attachAvatarUrls(nextUsers)
+    ]);
+    if (!firstError) {
+      const avatarError = profilesWithAvatars.error ?? accountsWithAvatars.error ?? usersWithAvatars.error;
+      if (avatarError) setError(`头像暂时无法加载：${avatarError}`);
+    }
+    setProfiles(profilesWithAvatars.rows);
+    setAccounts(accountsWithAvatars.rows);
+    setUsers(usersWithAvatars.rows);
     setAudit(nextAudit);
     const rows: ContentRow[] = [
       ...nextPosts.map((item) => ({ ...item, target_type: 'post' as const })),
@@ -137,10 +175,12 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     const rows = role === 'user'
       ? ((data as { users?: AdminProfile[] } | null)?.users ?? [])
       : ((data as { admins?: AdminProfile[] } | null)?.admins ?? []);
+    const avatarResult = await attachAvatarUrls(rows);
+    if (avatarResult.error) setError(`头像暂时无法加载：${avatarResult.error}`);
     if (role === 'user') {
-      setUsers(rows); setOffsets((current) => ({ ...current, users: rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 }));
+      setUsers(avatarResult.rows); setOffsets((current) => ({ ...current, users: rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 }));
     } else {
-      setAccounts(rows); setOffsets((current) => ({ ...current, admins: rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 }));
+      setAccounts(avatarResult.rows); setOffsets((current) => ({ ...current, admins: rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 }));
     }
     setLoading(false);
   };
@@ -161,8 +201,10 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       if (queryError || failure?.error) setError(failure?.error ?? queryError?.message ?? '账号读取失败。');
       const result = data as { users?: AdminProfile[]; admins?: AdminProfile[] } | null;
       const rows = role === 'user' ? (result?.users ?? []) : (result?.admins ?? []);
-      if (role === 'user') { setUsers((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, users: start + rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 })); }
-      else { setAccounts((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, admins: start + rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 })); }
+      const avatarResult = await attachAvatarUrls(rows);
+      if (avatarResult.error) setError(`头像暂时无法加载：${avatarResult.error}`);
+      if (role === 'user') { setUsers((current) => [...current, ...avatarResult.rows]); setOffsets((current) => ({ ...current, users: start + rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 })); }
+      else { setAccounts((current) => [...current, ...avatarResult.rows]); setOffsets((current) => ({ ...current, admins: start + rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 })); }
     } else if (section === 'audit') {
       const start = offsets.audit; const { data, error: queryError } = await supabase.from('moderation_audit').select('id,actor_id,target_type,target_id,action,reason,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).range(start, start + 199);
       if (queryError) setError(queryError.message);
@@ -354,7 +396,14 @@ function AccountDesk({ mode, profiles, search, setSearch, onSearch, statusFilter
     const { data, error } = await supabase.functions.invoke('admin-manage', { body: { action: 'find_account', lookup: lookup.trim() } });
     const failure = await readFunctionFailure(error, data);
     if (error || failure?.error) onMessage(failure?.error === 'account_not_found' ? '找不到匹配的已注册账号。' : failure?.error ?? error?.message ?? '账号查找失败。');
-    else setCandidate((data as { account?: AdminProfile } | null)?.account ?? null);
+    else {
+      const account = (data as { account?: AdminProfile } | null)?.account ?? null;
+      if (account) {
+        const avatarResult = await attachAvatarUrls([account]);
+        setCandidate(avatarResult.rows[0] ?? account);
+        if (avatarResult.error) onMessage(`头像暂时无法加载：${avatarResult.error}`);
+      } else setCandidate(null);
+    }
     setLookupBusy(false);
   };
 
@@ -404,7 +453,7 @@ function AccountDesk({ mode, profiles, search, setSearch, onSearch, statusFilter
       return <article className="admin-data-row" key={person.id}><div className="account-target"><Avatar profile={person} /><div><b>{person.display_name}{mode === 'admins' && ' · 管理员'}<span className={`status-pill ${state}`}>{statusLabel(state, person.suspension_expires_at)}</span></b><small>{person.email ?? '邮箱不可用'} · UID {person.uid} · 注册 {formatDate(person.created_at)}</small><p>{person.bio || '暂无个人简介'}</p></div></div>{mode === 'admins' ? <div className="admin-actions account-actions"><button className="soft-button" onClick={() => { setResetPassword(''); setResetPasswordConfirm(''); setResetReason(''); setResetTarget(person); }}><Icon name="key" />修改密码</button><button className="danger-button" onClick={() => void changeRole(person, 'revoke_admin')}>撤销管理员</button></div> : <div className="admin-actions account-actions">{state !== 'banned' && <><select value={hours} onChange={(event) => setSuspensionHours({ ...suspensionHours, [person.id]: Number(event.target.value) })} aria-label={`${person.display_name}的暂停时长`}><option value={24}>24 小时</option><option value={168}>7 天</option><option value={720}>30 天</option></select><button className="soft-button" onClick={() => void onPerform('suspend_user', 'user', person.id, { suspensionHours: hours })}>{state === 'suspended' ? '重新暂停' : '暂停'}</button></>}{state === 'banned' ? <button className="primary-button compact" onClick={() => void onPerform('unban_user', 'user', person.id)}>手动解封</button> : <button className="danger-button" onClick={() => void onPerform('ban_user', 'user', person.id)}>永久封禁</button>}{state === 'suspended' && <button className="primary-button compact" onClick={() => void onPerform('restore_user', 'user', person.id)}>恢复账号</button>}</div>}</article>;
     })}{profiles.length === 0 && <div className="admin-empty"><Icon name="search_off" /><b>{search ? '没有匹配账号' : mode === 'users' ? '还没有普通用户' : '还没有管理员'}</b></div>}</div>
     {hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : mode === 'users' ? '加载更多用户' : '加载更多管理员'}</button>}
-    {showAddAdmin && <div className="admin-modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setShowAddAdmin(false); }}><section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="add-admin-title"><header><div><p className="eyebrow">ADMINISTRATORS</p><h2 id="add-admin-title">添加管理员</h2></div><button className="icon-button" aria-label="关闭" onClick={() => setShowAddAdmin(false)}><Icon name="close" /></button></header><p className="admin-modal-note">输入已注册账号的 6 位 UID 或邮箱。只有邮箱已验证且账号正常的普通用户可以添加；管理员权限由独立管理员账号表授权。</p><form className="admin-role-lookup" onSubmit={(event) => void findAccount(event)}><input value={lookup} onChange={(event) => setLookup(event.target.value)} placeholder="6 位 UID 或 name@example.com" aria-label="通过 UID 或邮箱查找账号" required /><button className="primary-button" disabled={lookupBusy}><Icon name="search" />{lookupBusy ? '查找中…' : '查找账号'}</button></form>{candidate && <article className="admin-role-candidate"><div><b>{candidate.display_name}</b><small>{candidate.email ?? '无邮箱'} · UID {candidate.uid}</small><small>{candidate.email_confirmed_at ? '邮箱已验证' : '邮箱尚未验证'} · {statusLabel(effectiveStatus(candidate), candidate.suspension_expires_at)}</small></div></article>}{candidate && candidateEligible && <form className="admin-modal-add-form" onSubmit={(event) => { event.preventDefault(); void changeRole(candidate, 'grant_admin', grantReason); }}><label><span>添加原因（写入操作记录）</span><input maxLength={500} value={grantReason} onChange={(event) => setGrantReason(event.target.value)} required /></label><footer><button className="primary-button compact" type="submit">确认添加管理员</button></footer></form>}{candidate && !candidateEligible && <p className="admin-modal-note">该账号需要邮箱验证且状态正常后才能添加。</p>}<footer><button className="soft-button" onClick={() => setShowAddAdmin(false)}>关闭</button></footer></section></div>}
+    {showAddAdmin && <div className="admin-modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setShowAddAdmin(false); }}><section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="add-admin-title"><header><div><p className="eyebrow">ADMINISTRATORS</p><h2 id="add-admin-title">添加管理员</h2></div><button className="icon-button" aria-label="关闭" onClick={() => setShowAddAdmin(false)}><Icon name="close" /></button></header><p className="admin-modal-note">输入已注册账号的 6 位 UID 或邮箱。只有邮箱已验证且账号正常的普通用户可以添加；管理员权限由独立管理员账号表授权。</p><form className="admin-role-lookup" onSubmit={(event) => void findAccount(event)}><input value={lookup} onChange={(event) => setLookup(event.target.value)} placeholder="6 位 UID 或 name@example.com" aria-label="通过 UID 或邮箱查找账号" required /><button className="primary-button" disabled={lookupBusy}><Icon name="search" />{lookupBusy ? '查找中…' : '查找账号'}</button></form>{candidate && <article className="admin-role-candidate"><Avatar profile={candidate} /><div><b>{candidate.display_name}</b><small>{candidate.email ?? '无邮箱'} · UID {candidate.uid}</small><small>{candidate.email_confirmed_at ? '邮箱已验证' : '邮箱尚未验证'} · {statusLabel(effectiveStatus(candidate), candidate.suspension_expires_at)}</small></div></article>}{candidate && candidateEligible && <form className="admin-modal-add-form" onSubmit={(event) => { event.preventDefault(); void changeRole(candidate, 'grant_admin', grantReason); }}><label><span>添加原因（写入操作记录）</span><input maxLength={500} value={grantReason} onChange={(event) => setGrantReason(event.target.value)} required /></label><footer><button className="primary-button compact" type="submit">确认添加管理员</button></footer></form>}{candidate && !candidateEligible && <p className="admin-modal-note">该账号需要邮箱验证且状态正常后才能添加。</p>}<footer><button className="soft-button" onClick={() => setShowAddAdmin(false)}>关闭</button></footer></section></div>}
     {resetTarget && <div className="admin-modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) closeResetAdmin(); }}><section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="reset-admin-title"><header><div><p className="eyebrow">ADMIN CREDENTIALS</p><h2 id="reset-admin-title">修改管理员密码</h2></div><button className="icon-button" aria-label="关闭" onClick={closeResetAdmin}><Icon name="close" /></button></header><p className="admin-modal-note">正在修改 <b>{resetTarget.display_name}</b>（{resetTarget.email}）的登录密码。新密码会立即生效，系统不会显示旧密码。</p><form onSubmit={(event) => void resetAdminPassword(event)}><label><span>新密码</span><input type="password" minLength={8} maxLength={128} autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} required /></label><label><span>确认新密码</span><input type="password" minLength={8} maxLength={128} autoComplete="new-password" value={resetPasswordConfirm} onChange={(event) => setResetPasswordConfirm(event.target.value)} required /></label><label><span>重置原因（写入操作记录）</span><input maxLength={500} value={resetReason} onChange={(event) => setResetReason(event.target.value)} required /></label><footer><button type="button" className="soft-button" onClick={closeResetAdmin}>取消</button><button className="primary-button" disabled={resetBusy}>{resetBusy ? '更新中…' : '更新密码'}</button></footer></form></section></div>}
   </section>;
 }

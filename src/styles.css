@@ -80,3 +80,7 @@
 .post-more-menu>div button{width:100%;min-height:40px;display:flex;align-items:center;gap:9px;padding:0 10px;border:0;border-radius:9px;background:transparent;color:var(--text);text-align:left;font:inherit;font-size:11px}
 .post-more-menu>div button:hover,.post-more-menu>div button:focus-visible{outline:0;background:var(--surface-2)}
 .post-more-menu>div button .icon{color:var(--muted)}
+
+/* Keep the matched account avatar beside its identity on narrow screens too. */
+.admin-role-candidate{justify-content:flex-start}
+@media(max-width:640px){.admin-role-candidate{align-items:center;flex-direction:row}}
