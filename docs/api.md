@@ -1,17 +1,23 @@
 # 接口文档
 
-版本：0.1.0  
-后端：Supabase Auth、PostgREST、Storage、Edge Functions  
-迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`、`supabase/migrations/20261108125637_add_report_review_reason.sql`、`supabase/migrations/20261108132208_random_profile_names_password_status.sql`、`supabase/migrations/20261108141538_fix_legacy_admin_rpc_and_default_names.sql`
+版本：0.1.0
+
+文档更新时间：2026-11-08
+
+后端：Supabase Auth、PostgREST、Storage、Edge Functions
+
+迁移：以 `supabase/migrations/` 中的文件名顺序为准；兼容仓库应执行全部尚未应用的迁移，不要只复制某一版本的文件名。
 
 ## 连接与鉴权
 
 前端从环境变量读取：
 
 - `VITE_SUPABASE_URL`：Supabase Project URL。
-- `VITE_SUPABASE_ANON_KEY`：公开 anon/publishable key，只能用于带 RLS 的客户端请求。
+- `VITE_SUPABASE_ANON_KEY`：公开的 legacy anon key 或 `sb_publishable_...` key，只能用于带 RLS 的客户端请求；新项目优先使用 publishable key。
 
-私密操作使用 Supabase 登录会话的 Bearer access token。service-role key 只能保存在 Supabase Edge Function 的服务端环境中。
+Supabase SDK 会把 publishable/anon key 放在 `apikey` 请求头，把登录用户的 access token 放在 `Authorization: Bearer <access_token>`。不要将 API key 放入 Bearer 头。service-role/secret key 只能保存在 Edge Function 服务端环境，不得进入前端、`.env.local` 或 Git。
+
+四个 Edge Function 均设置 `verify_jwt = true`。平台会先验证用户 JWT，函数内部再执行角色、账号状态、内容归属和业务字段校验。
 
 邮箱注册和登录由 Supabase Auth JS SDK 调用：
 
@@ -27,7 +33,17 @@
 
 管理员登录使用 Supabase Auth 邮箱账号，只能从 `https://admin.yeecc.cn/` 登录；后台不提供注册。管理员权限唯一来源为启用 RLS 的 `public.admin_accounts` 表，普通用户没有该表的读写权限；`profiles.role` 仅作兼容字段，不能单独授予后台权限。后台忘记密码用同一 Resend 邮件发送验证码，不使用密码重置链接；后台地址保留在 Supabase Authentication → URL Configuration 的 Redirect URLs 中，以兼容现有会话与历史链接。
 
-Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 SMTP 设置为主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`；Resend API key 只保存在 Supabase Auth 的 SMTP 密码配置，不放入前端环境变量或 Git。验证码为 6 位数字，有效期 10 分钟，发送间隔至少 60 秒。`npx.cmd supabase config push --yes` 用于推送本仓库中的验证码有效期和邮件模板；SMTP 凭据需在 Supabase Dashboard 的 Authentication → SMTP Settings 配置，或通过 Supabase Management API 配置。注册、恢复密码和验证码登录模板分别为 `supabase/templates/confirmation.html`、`supabase/templates/recovery.html`、`supabase/templates/magic_link.html`。
+Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 SMTP 设置为主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`；Resend API key 只保存在 Supabase Auth 的 SMTP 密码配置，不放入前端环境变量或 Git。
+
+当前 `supabase/config.toml` 声明：
+
+- 密码至少 8 位且同时包含字母和数字。
+- OTP 为 6 位数字，有效期 600 秒，发送间隔至少 60 秒。
+- 注册、恢复密码、验证码登录分别使用 `confirmation.html`、`recovery.html`、`magic_link.html` 模板。
+- 密码变更通知默认开启。
+- 配置声明启用泄露密码保护；该能力要求 Supabase Pro 及以上套餐，免费项目是否实际生效以 Authentication 设置和安全顾问结果为准。
+
+`npx.cmd supabase config diff` 可先比较本地与托管配置，`npx.cmd supabase config push --yes` 用于推送已声明配置。SMTP 密码属于托管凭据，不参与明文比较或提交。
 
 ## 数据访问接口
 
@@ -40,7 +56,7 @@ Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 S
 | Object store | 主要字段 |
 |---|---|
 | `checklists` | `id, title, createdAt, archivedAt?` |
-| `checklistItems` | `id, checklistId, title, dueDate?, note?, done, createdAt` |
+| `checklistItems` | `id, checklistId, title, dueDate?, note?, done, completedAt?, createdAt` |
 | `checkTemplates` | `id, title, items[], createdAt` |
 | `checkRuns` | `id, templateId, title, items[{id,title,done}], createdAt, completedAt?` |
 | `meters` | `id, name, kind, unit, createdAt` |
@@ -48,23 +64,24 @@ Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 S
 | `pets` | `id, name, kind, birthday?, note?, createdAt` |
 | `petEvents` | `id, petId, kind, title, date, reminderDate?, note?, completed, createdAt` |
 
-备份格式为 `{ schemaVersion: 1, exportedAt, data }`。导入预览会显示各数据表数量及新增/覆盖数。写入前校验版本、导出时间、各记录必填字段/类型/日期、每表 ID 唯一性以及清单事项、表具读数、宠物事件的关联；总文件限制 20 MB。校验通过后用单个 IndexedDB read/write transaction 合并，相同 ID 覆盖，其他记录保留。校验失败不写入。
+`completedAt` 仅在事项完成时写入；取消完成会清除该字段。首页按设备本地日计算进度，不直接截取 UTC 时间。历史已完成事项若没有 `completedAt`，界面回退到 `createdAt` 估算。
+
+备份格式为 `{ schemaVersion: 1, exportedAt, data }`。导入预览会显示各数据表数量及新增/覆盖数。写入前校验版本、导出时间、各记录必填字段/类型/日期、每表 ID 唯一性、`completedAt` 时间格式，以及清单事项、表具读数、宠物事件的关联；总文件限制 20 MB。校验通过后用单个 IndexedDB read/write transaction 合并，相同 ID 覆盖，其他记录保留。校验失败不写入。
 
 ### 动态、话题与互动
 
 | 资源 | 方法与路径 | 用途 / 权限 |
 |---|---|---|
-| `posts` | `GET /posts?moderation_status=eq.visible&order=created_at.desc&limit=40` | 读取可见动态；未登录可读 |
+| `posts` | `GET /posts?moderation_status=eq.visible&order=created_at.desc&limit=40` | 读取可见动态；RLS 允许公开读取，普通 App 在未登录时仍显示登录引导 |
 | `posts` | `POST /posts` | 登录用户以自己的 `author_id` 创建文字/图片动态；数据库默认状态为 `visible` |
-| `posts` | `PATCH /posts?id=eq.{id}` | 作者修改自己可见动态的 `body` 和 `image_paths` |
-| `posts` | `DELETE /posts?id=eq.{id}` | 作者删除自己的动态；关联评论、话题关系由外键级联 |
+| `posts` | `POST /rpc/update_own_post` | 作者原子修改自己可见动态的正文，并重新同步 `#话题`；参数为 `p_post_id`、`p_body` |
 | `topics` | `GET /topics?slug=eq.{slug}` | 查找话题 |
 | `topics` | `POST /topics` | 登录用户创建话题，slug/title 唯一 |
 | `post_topics` | `GET /post_topics?post_id=eq.{id}` | 读取动态话题；嵌套关联 `topics(id,slug,title)` |
 | `post_topics` | `POST /post_topics` | 仅能为自己的动态添加话题 |
 | `comments` | `GET /comments?post_id=eq.{id}&moderation_status=eq.visible` | 读取可见评论 |
 | `comments` | `POST /comments` | 登录用户评论；允许文字、表情和最多 4 张图片路径 |
-| `comments` | `DELETE /comments?id=eq.{id}` | 作者删除自己的评论 |
+| `posts/comments` | `POST /functions/v1/delete-content` | 作者删除自己的动态或评论；先隐藏，再清理图片和数据库记录 |
 | `post_likes` | `POST /post_likes` | 当前用户点赞；`(post_id,user_id)` 唯一 |
 | `post_likes` | `DELETE /post_likes?post_id=eq.{id}&user_id=eq.{uid}` | 取消自己的点赞 |
 | `follows` | `POST /follows` | 当前用户关注其他用户；禁止关注自己 |
@@ -72,7 +89,9 @@ Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 S
 | `reports` | `POST /reports` | 登录用户举报动态、评论或账号，初始状态 `open` |
 | `reports` | `GET /reports?reporter_id=eq.{uid}&order=created_at.desc` | 用户读取自己的举报、处理状态和 `review_reason`；RLS 限制只能读本人记录 |
 
-举报表的 `review_reason` 为可空文本，最多 500 字。举报被驳回时，`admin-moderate` 将后台填写的原因写入该字段；举报被标记已处理时字段清空。历史驳回理由从 `moderation_audit` 中按举报 ID 回填。只有举报人本人和管理员可以通过 RLS 读取对应举报记录及理由。
+举报状态为 `open`、`handled`、`dismissed`。`review_reason` 为可空文本，最多 500 字；举报被驳回时，`admin-moderate` 将后台填写的原因写入该字段，其他处理动作清空该字段。历史驳回理由从 `moderation_audit` 中按举报 ID 回填。只有举报人本人和管理员可以通过 RLS 读取对应举报记录及理由。
+
+普通用户删除动态或评论时，前端调用 `delete-content`，而不是直接依赖表 DELETE；这样可以在删除前统一校验账号状态、内容归属并清理 Storage 图片。底层 RLS 仍保留作者和管理员的数据库删除权限作为防御边界。
 
 动态正文最多 5,000 字；评论最多 2,000 字；动态最多 9 张图，评论最多 4 张图；每张图片最大 5 MB，MIME 仅接受 JPEG、PNG、WebP、GIF。
 
@@ -84,7 +103,20 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 ### 用户资料
 
-`profiles.uid` 是数据库生成的 6 位纯数字 UID，唯一且创建后不可修改；它只供后台搜索和管理，普通用户端的资料查询不请求或展示 UID。`id` 是内部 Auth UUID 和关系外键。新账号昵称由数据库触发器随机生成，不包含 UID，用户可自行修改。用户只可更新自己的 `username`、`display_name`、`avatar_path`、`bio`；角色、UID 和账号状态不能由客户端修改。邮箱不存进公开 profile 表，也不由社区 REST 查询返回。普通用户的个人设置页对本人邮箱做掩码；完整邮箱只由管理员后台调用 `admin-manage` 读取。`user_auth_settings` 单独保存是否已设置密码，启用 RLS 且用户只能读取自己的状态。资料编辑通过 `PATCH /rest/v1/profiles?id=eq.{auth-uuid}` 更新 `display_name`（1–40 字）、`bio`（最多 240 字）与 `avatar_path`。头像限 JPG/PNG/WebP、最大 2 MiB；先上传到 `{auth-uuid}/{uuid}.{ext}`，资料更新成功后才删除旧头像。失败时清理新文件并保留原资料。
+`profiles.uid` 是数据库生成的 6 位纯数字 UID，唯一且创建后不可修改；它只供后台按 UID 搜索和管理。普通 App 的资料查询不请求或展示 UID。`id` 是内部 Auth UUID 和关系外键。
+
+| 操作 | 方法与路径 | 说明 |
+|---|---|---|
+| 读取公开资料 | `GET /profiles?select=id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at&id=eq.{id}` | RLS 不公开已注销资料；邮箱不在 `profiles` 表中 |
+| 读取本人资料 | `GET /profiles?select=id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at&id=eq.{auth-uuid}` | 账号设置和资料编辑使用 |
+| 修改本人资料 | `PATCH /profiles?id=eq.{auth-uuid}` | 仅可更新 `username`、`display_name`、`avatar_path`、`bio` |
+| 读取密码状态 | `GET /user_auth_settings?select=password_set&user_id=eq.{auth-uuid}` | 仅本人可读，用于区分“设置密码”和“修改密码” |
+
+新账号由 `on_auth_user_created` 触发器创建 profile，生成 6 位 UID 和随机昵称；昵称不包含 UID 或邮箱前缀。用户可修改昵称和简介，不能修改 UID、角色或账号状态。`profiles.role` 仅作兼容/展示字段，后台权限只认 `admin_accounts`。
+
+邮箱不存进公开 profile 表，也不由社区 REST 查询返回。普通用户只看到本人邮箱的掩码；完整邮箱只由 active 管理员通过 `admin-manage` 读取。`user_auth_settings` 启用 RLS，匿名不可访问，authenticated 只能读取本人记录且没有客户端更新权限。
+
+资料编辑更新 `display_name`（1–40 字）、`bio`（最多 240 字）与 `avatar_path`。头像限 JPG/PNG/WebP、最大 2 MiB；先上传到 `{auth-uuid}/{uuid}.{ext}`，资料更新成功后才删除旧头像。失败时清理新文件并保留原资料。
 
 ## Edge Functions
 
@@ -92,19 +124,33 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 ### `POST /functions/v1/admin-manage`
 
-仅 active 管理员可调用。函数校验用户会话，并要求用户 ID 同时存在于 `admin_accounts` 且 profile 状态为 `active`；仅服务端使用 service-role key 调用数据库受限 RPC 或 Auth Admin API。普通用户不能查询管理员表、读取后台完整邮箱或变更管理员状态。
+仅 active 管理员可调用。函数校验用户会话，并要求用户 ID 同时存在于 `admin_accounts` 且 profile 状态为 `active`；仅服务端使用 service-role key 调用数据库受限 RPC 或 Auth Admin API。函数只允许 `https://admin.yeecc.cn` 与本地开发地址发起跨域请求。
 
 请求动作：
 
+| `action` | 请求字段 | 返回 |
+|---|---|---|
+| `verify` | 无 | `{ ok, actor }` |
+| `list_users` | `query?`、`statusFilter?`、`sort?`、`registeredWithin?`、`limit?`、`offset?` | `{ ok, users }` |
+| `list_admins` | `query?`、`limit?`、`offset?` | `{ ok, admins }` |
+| `list_accounts` | 与 `list_admins` 相同 | 旧兼容入口，返回 `{ ok, accounts }` |
+| `find_account` | `lookup`，6 位 UID 或完整邮箱 | `{ ok, account }` |
+| `grant_admin` | `targetId`、`reason` | `{ ok: true }` |
+| `revoke_admin` | `targetId`、`reason` | `{ ok: true }` |
+| `reset_admin_password` | `targetId`、`newPassword`、`reason` | `{ ok: true }` |
+
+列表查询不再将昵称作为搜索条件，只匹配 UID 或完整/部分邮箱。普通用户支持 `registeredWithin: "7d" | "30d" | "90d"`，状态筛选为 `all`、`active`、`suspended`、`banned`、`deleted`，排序为 `newest` 或 `oldest`。每页最多 100 条。
+
 ```json
-{ "action": "verify" }
-{ "action": "list_accounts", "query": "6 位 UID 或邮箱/昵称", "limit": 100, "offset": 0 }
-{ "action": "list_users", "query": "6 位 UID 或邮箱", "statusFilter": "all | active | suspended | banned | deleted", "sort": "newest | oldest", "limit": 100, "offset": 0 }
-{ "action": "list_admins", "query": "6 位 UID 或邮箱", "limit": 100, "offset": 0 }
-{ "action": "find_account", "lookup": "6 位 UID 或完整邮箱" }
-{ "action": "grant_admin", "targetId": "auth-user-uuid", "reason": "职责需要" }
-{ "action": "revoke_admin", "targetId": "auth-user-uuid", "reason": "权限调整" }
-{ "action": "reset_admin_password", "targetId": "auth-user-uuid", "newPassword": "8-128 位且包含字母和数字", "reason": "凭据重置" }
+{
+  "action": "list_users",
+  "query": "100003",
+  "statusFilter": "active",
+  "sort": "newest",
+  "registeredWithin": "30d",
+  "limit": 50,
+  "offset": 0
+}
 ```
 
 `verify` 的成功响应中，`actor` 包含管理员 `id`、公开 `uid`、`display_name`、完整 `email` 和 `avatar_path`：
@@ -115,7 +161,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
   "actor": {
     "id": "auth-user-uuid",
     "uid": "100003",
-    "display_name": "日常伙伴-100003",
+    "display_name": "海边旅人",
     "email": "admin@example.com",
     "avatar_path": "auth-user-uuid/avatar.webp"
   }
@@ -124,9 +170,9 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 后台前端使用 `avatar_path` 向私有 `community-media` bucket 请求短时签名 URL，在右上角显示头像；没有头像或签名失败时显示名称首字。
 
-`list_accounts`、`list_users` 与 `list_admins` 每页最多返回 100 条；普通用户支持按账号状态、近 7/30/90 天注册范围筛选并按注册时间新旧排序。筛选按暂停到期后的有效状态判断。账号对象仅通过受保护后台接口返回完整邮箱。`find_account` 只查找现有普通用户。`grant_admin` 只接受状态正常且邮箱已验证的现有普通账号，并将身份写入独立的 `admin_accounts` 表；后台登录页没有注册入口。`revoke_admin` 不能移除最后一位 active 管理员。`reset_admin_password` 仅可重置另一位管理员的密码，要求填写原因；服务端先持久化重置意图，再调用 Auth Admin API 并写入操作结果，密码不会写入审计。角色授权/撤销与审计写入在同一数据库事务内完成；原因必填且最多 500 字。成功变更返回 `{ "ok": true }`。
+筛选按暂停到期后的有效状态判断。账号对象仅通过受保护后台接口返回完整邮箱。`find_account` 只查找现有普通用户。`grant_admin` 只接受状态正常且邮箱已验证的现有普通账号，并将身份写入独立的 `admin_accounts` 表；后台登录页没有注册入口。`revoke_admin` 不能移除最后一位 active 管理员。`reset_admin_password` 仅可重置另一位管理员，密码要求 8–128 位且至少包含 1 个字母和 1 个数字，原因必填。服务端先持久化重置意图，再调用 Auth Admin API 并写入结果；密码不会进入审计日志。角色授权/撤销与审计写入在同一数据库事务内完成；原因最多 500 字。
 
-错误包括：`401 unauthorized`、`403 forbidden`、`404 account_not_found`、`400 target_not_eligible`、`400 already_admin`、`400 last_active_admin`、`400 invalid_request`。角色字段不能通过 PostgREST 客户端直接修改。
+常见错误包括：`401 unauthorized`、`403 forbidden`、`404 account_not_found`、`404 target_not_admin`、`400 target_not_eligible`、`400 already_admin`、`400 last_active_admin`、`400 lookup_required`、`400 invalid_request`、`400 unsupported_action` 和 `400 admin_operation_failed`。密码已更新但审计失败时可能返回 `partial: true`。角色字段不能通过 PostgREST 客户端直接修改。
 
 ### `POST /functions/v1/admin-moderate`
 
@@ -149,7 +195,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 后台举报详情显示举报人 UID；用户类举报显示被举报用户 UID，动态/评论举报显示内容作者 UID 和内容 ID，并展示举报内容。后台内容管理中点击动态或评论可读取详情。动态详情包含文字、图片、作者 UID、状态与时间；评论详情还包含所属动态文字与图片。隐藏、删除及恢复操作均要求填写原因并通过确认弹窗；详情、记录状态或图片签名信息不完整时操作按钮禁用。
 
-成功：`{ "ok": true }`。常见错误：`401 unauthorized`、`403 forbidden`、`400 unsupported_action`、`400 invalid_request`、`404 target_not_found`、`409 content_already_removed`。
+成功：`{ "ok": true }`。常见错误：`400 invalid_request`、`400 invalid_json`、`400 invalid_suspension_duration`、`400 report_id_required`、`400 unsupported_action`、`400 permanently_banned_accounts_require_manual_unban`、`400 target_is_not_banned`、`401 unauthorized`、`403 forbidden`、`403 target_not_manageable`、`404 target_not_found`、`409 content_already_removed`。业务动作已执行但审计或举报状态同步失败时返回 `partial: true`，后台会刷新记录并提示人工核查。
 
 ### `POST /functions/v1/delete-content`
 
@@ -159,7 +205,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 { "targetType": "post", "targetId": "uuid" }
 ```
 
-成功：`{ "ok": true, "deletedMediaCount": 2 }`。其他用户、未登录用户、暂停中和封禁用户不能调用。
+成功：`{ "ok": true, "deletedMediaCount": 2 }`。常见错误：`400 invalid_request`、`401 unauthorized`、`403 profile_not_found`、`403 account_not_active`、`403 target_not_owned`、`500 media_cleanup_failed`、`500 content_delete_failed`。内容已先隐藏但媒体或数据库删除失败时返回 `partial: true`。其他用户、未登录用户、暂停中和封禁用户不能调用。
 
 ### `POST /functions/v1/delete-account`
 
@@ -169,7 +215,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 { "confirmation": "DELETE" }
 ```
 
-成功：`{ "ok": true, "localDataRetained": true }`。管理员账号不能通过此接口自助删除。
+成功：`{ "ok": true, "localDataRetained": true }`。常见错误：`400 confirmation_required`、`401 unauthorized`、`403 admin_account_cannot_self_delete`、`500 admin_membership_check_failed`、`500 media_list_failed`、`500 media_cleanup_failed`。管理员账号不能通过此接口自助删除。
 
 ## 主要错误处理
 
@@ -180,10 +226,10 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 ## 权限摘要
 
-| 角色 | 浏览公开社区 | 发布互动 | 读取本人举报 | 管理举报/内容 | 修改账号状态 |
-|---|---:|---:|---:|---:|---:|
-| 未登录 | 后端允许读取可见内容，应用界面显示登录引导 | 否 | 否 | 否 | 否 |
-| 邮箱验证后普通用户 | 是 | 是 | 是 | 否 | 否 |
-| 暂停中账号 | 是 | 到期前否；到期后自动恢复 | 是 | 否 | 否 |
-| 永久封禁账号 | 是 | 否 | 是 | 否 | 否 |
-| 管理员 | 是 | 是 | 是 | 是 | 查看完整邮箱、添加/撤销管理员及管理用户和内容（受保护 Edge Function） |
+| 角色 | 读取可见社区 | 发布互动 | 读取本人举报 | 审核内容/举报 | 管理账号状态 | 管理管理员/完整邮箱 | 注销本人线上账号 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 未登录 | 后端允许，应用显示登录引导 | 否 | 否 | 否 | 否 | 否 | 否 |
+| 邮箱验证后普通用户 | 是 | 是 | 是 | 否 | 否 | 否 | 是 |
+| 暂停中账号 | 是 | 到期前否；到期后自动恢复 | 是 | 否 | 否 | 否 | 是（已有有效会话或可重新登录时） |
+| 永久封禁账号 | 是 | 否 | 是 | 否 | 否 | 否 | 是（已有有效会话时） |
+| active 管理员 | 是 | 是 | 是 | 是 | 是 | 是 | 否，需先撤销管理员 |
