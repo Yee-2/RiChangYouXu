@@ -8,3 +8,29 @@ verify_jwt = true
 
 [functions.delete-content]
 verify_jwt = true
+
+[functions.admin-manage]
+verify_jwt = true
+
+[auth]
+additional_redirect_urls = ["https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/"]
+site_url = "https://daily.yeecc.cn"
+
+[auth.email]
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[auth.sms]
+enable_confirmations = true
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[db.pooler]
+default_pool_size = 15
+max_client_conn = 200
+
+[storage.vector]
+enabled = false

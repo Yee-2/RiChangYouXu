@@ -9,12 +9,25 @@ import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, 
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
 type ProfileView = 'home' | 'auth' | 'account';
-const AdminPanel = lazy(() => import('./AdminPanel'));
+const AdminPortal = lazy(() => import('./AdminPortal'));
 const emptyData: DataState = { checklists: [], checklistItems: [], checkTemplates: [], checkRuns: [], meters: [], meterReadings: [], pets: [], petEvents: [], preferences: [] };
 const id = () => crypto.randomUUID();
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
 const reminderLabel = (date?: string) => !date ? '未设置提醒' : date < today() ? `已逾期 · ${date}` : date === today() ? `今天提醒 · ${date}` : `提醒日期 · ${date}`;
 const iconNames: Record<NavKey, string> = { home: 'home', lists: 'checklist', records: 'monitoring', community: 'forum', profile: 'person' };
+
+export default function App() {
+  const adminHost = window.location.hostname.toLowerCase() === 'admin.yeecc.cn';
+  const localAdminRoute = import.meta.env.DEV && window.location.hash === '#/admin';
+  if (adminHost || localAdminRoute) return <Suspense fallback={<div className="loading"><Icon name="progress_activity" className="spin" /><p>正在打开管理工作台…</p></div>}><AdminPortal /></Suspense>;
+  if (window.location.hash === '#/admin') return <RedirectToAdmin />;
+  return <LifeApp />;
+}
+
+function RedirectToAdmin() {
+  useEffect(() => { window.location.replace('https://admin.yeecc.cn/'); }, []);
+  return <div className="loading"><Icon name="open_in_new" /><p>正在前往独立管理后台…</p></div>;
+}
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -29,7 +42,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
-export default function App() {
+function LifeApp() {
   const [data, setData] = useState<DataState>(emptyData);
   const [ready, setReady] = useState(false);
   const [nav, setNav] = useState<NavKey>('home');
@@ -40,7 +53,6 @@ export default function App() {
   const [recordTab, setRecordTab] = useState<'utilities' | 'pets'>('utilities');
   const [toast, setToast] = useState('');
   const [session, setSession] = useState<Session | null>(null);
-  const [routeHash, setRouteHash] = useState(() => window.location.hash);
   const [pendingBackup, setPendingBackup] = useState<{ fileName: string; payload: unknown; preview: BackupPreview } | null>(null);
   const [importError, setImportError] = useState('');
 
@@ -57,12 +69,6 @@ export default function App() {
     void supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
     return () => subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const updateRoute = () => setRouteHash(window.location.hash);
-    window.addEventListener('hashchange', updateRoute);
-    return () => window.removeEventListener('hashchange', updateRoute);
   }, []);
 
   useEffect(() => {
@@ -274,8 +280,6 @@ export default function App() {
 
   if (!ready) return <div className="loading"><Icon name="progress_activity" className="spin" /><p>正在准备你的生活空间…</p></div>;
 
-  if (routeHash === '#/admin') return <Suspense fallback={<div className="loading"><Icon name="progress_activity" className="spin" /><p>正在打开管理工作台…</p></div>}><AdminPanel session={session} onExit={() => { window.location.hash = ''; setNav('community'); }} /></Suspense>;
-
   return <div className="app-shell">
     <header className="topbar">
       <a className="brand" href="#home" onClick={(event) => { event.preventDefault(); setNav('home'); }}><span className="brandmark"><Icon name="auto_awesome" size={18} /></span><span>日常有序</span></a>
@@ -359,7 +363,7 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
     if (!session || !supabase) { setAccountProfile(null); return; }
     let active = true;
     void (async () => {
-      const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status').eq('id', session.user.id).maybeSingle();
+      const { data, error } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status').eq('id', session.user.id).maybeSingle();
       if (error) { if (active) onMessage(error.message); return; }
       const value = data as CommunityProfile | null;
       if (value?.avatar_path) {

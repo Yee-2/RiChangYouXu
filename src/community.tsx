@@ -3,7 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { communityConfigured, supabase } from './supabase';
 import { Icon } from './Icon';
 
-export type Profile = { id: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'banned' | 'deleted'; suspension_expires_at?: string | null };
+export type Profile = { id: string; uid: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'banned' | 'deleted'; suspension_expires_at?: string | null };
 type Topic = { id: string; slug: string; title: string };
 type Post = { id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; topics?: Topic[]; liked?: boolean; followed?: boolean; likes?: number; comments?: CommentItem[]; images?: string[] };
 type CommentItem = { id: string; post_id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; images?: string[] };
@@ -21,7 +21,7 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
 
   const loadProfile = useCallback(async () => {
     if (!supabase || !session?.user) { setProfile(null); return; }
-    const { data, error: profileError } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
+    const { data, error: profileError } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
     if (profileError) { setError(profileError.message); return; }
     const value = data as Profile | null;
     if (value?.avatar_path) {
@@ -51,7 +51,7 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
       const list = (rawPosts ?? []) as Post[];
       const ids = list.map((post) => post.id); const authors = [...new Set(list.map((post) => post.author_id))];
       const [profileResult, topicResult, likeResult, commentResult, followResult] = await Promise.all([
-        authors.length ? supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', authors) : Promise.resolve({ data: [], error: null }),
+        authors.length ? supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', authors) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('post_topics').select('post_id,topics(id,slug,title)').in('post_id', ids) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('post_likes').select('post_id,user_id').in('post_id', ids) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('comments').select('id,post_id,author_id,body,image_paths,created_at,moderation_status').or(session?.user.id ? `moderation_status.eq.visible,and(author_id.eq.${session.user.id},moderation_status.eq.hidden)` : 'moderation_status.eq.visible').in('post_id', ids).order('created_at', { ascending: true }) : Promise.resolve({ data: [], error: null }),
@@ -66,7 +66,7 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
       }
       const likes = likeResult.data ?? []; const comments = (commentResult.data ?? []) as CommentItem[]; const followed = new Set((followResult.data ?? []).map((item) => item.followee_id as string));
       const commentAuthors = [...new Set(comments.map((comment) => comment.author_id))];
-      const commentProfiles = commentAuthors.length ? await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', commentAuthors) : { data: [], error: null };
+      const commentProfiles = commentAuthors.length ? await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', commentAuthors) : { data: [], error: null };
       if (commentProfiles.error) throw commentProfiles.error;
       for (const item of (commentProfiles.data ?? []) as Profile[]) people.set(item.id, item);
       const signedPaths = [...new Set([...list.flatMap((post) => post.image_paths), ...comments.flatMap((comment) => comment.image_paths), ...[...people.values()].map((person) => person.avatar_path).filter((path): path is string => Boolean(path))])];
@@ -102,7 +102,7 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
   const openUserProfile = (userId: string) => { setSelectedUserId(userId); setSelectedTopic(null); };
   if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={() => setSelectedUserId(null)}><Icon name="arrow_back" />返回社区</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{error}</div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? posts.map((post) => <PostCard key={post.id} post={post} session={session} profile={profile} onRefresh={loadPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />) : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
   return <div className="community-page">
-    <div className="community-title"><div><p className="eyebrow">SHARE A LITTLE JOY</p><h1>生活社区</h1><p>记录生活的小事，也看看别人的可爱日常。</p></div>{profile?.role === 'admin' && profile.account_status === 'active' && <a className="soft-button admin-entry" href="#/admin"><Icon name="admin_panel_settings" />管理后台</a>}</div>
+    <div className="community-title"><div><p className="eyebrow">SHARE A LITTLE JOY</p><h1>生活社区</h1><p>记录生活的小事，也看看别人的可爱日常。</p></div>{profile?.role === 'admin' && profile.account_status === 'active' && <a className="soft-button admin-entry" href={import.meta.env.DEV ? `${window.location.origin}/#/admin` : 'https://admin.yeecc.cn/'}><Icon name="admin_panel_settings" />管理后台</a>}</div>
     {session && profile && effectiveProfileStatus(profile) !== 'active' && <div className="community-alert">账号当前状态：{profile.account_status === 'suspended' ? `暂停中${profile.suspension_expires_at ? `，预计 ${new Date(profile.suspension_expires_at).toLocaleString('zh-CN')} 恢复` : ''}` : profile.account_status === 'banned' ? '永久封禁，社区发布和互动已关闭。' : '已注销'}。{profile.account_status !== 'deleted' && '如需了解处理原因，请联系管理员。'}</div>}
     <div className="community-feed-layout"><aside className="topic-rail"><h3>热门话题</h3><p className={!selectedTopic ? 'topic-link selected' : 'topic-link'} onClick={() => setSelectedTopic(null)}>全部动态</p>{['宠物日记','生活碎片','今日好心情','养宠新手','居家日常'].map((title) => <TopicShortcut key={title} title={title} active={selectedTopic?.title === title} onClick={(topic) => setSelectedTopic(topic)} />)}<div className="small-note">动态支持图片、表情、话题和评论。</div></aside><div className="feed-main">
       {session && profile && effectiveProfileStatus(profile) === 'active' && <Composer userId={session.user.id} onPosted={loadPosts} onError={setError} />}
@@ -120,7 +120,7 @@ function AuthCard() {
     const values = new FormData(event.currentTarget); const email = String(values.get('email') ?? '').trim(); const password = String(values.get('password') ?? '');
     try {
       if (mode === 'signup') {
-        const { data, error: authError } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin, data: { display_name: email.split('@')[0] } } });
+        const { data, error: authError } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
         if (authError) throw authError;
         setPendingEmail(email);
         setMessage(data.session ? '账号已创建并登录。' : '注册成功，请检查邮箱并点击验证链接，再回来登录。');
@@ -154,7 +154,7 @@ function PublicProfileHeader({ userId, session, ownId, onError, onOpenMy }: { us
     void (async () => {
       setLoading(true);
       const [profileResult, followerResult, followingResult, relationship] = await Promise.all([
-        supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', userId).maybeSingle(),
+        supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', userId).maybeSingle(),
         supabase.from('follows').select('follower_id', { count: 'exact', head: true }).eq('followee_id', userId),
         supabase.from('follows').select('followee_id', { count: 'exact', head: true }).eq('follower_id', userId),
         session ? supabase.from('follows').select('follower_id').eq('follower_id', session.user.id).eq('followee_id', userId).maybeSingle() : Promise.resolve({ data: null, error: null })
@@ -226,7 +226,7 @@ export function AccountSettings({ session, onMessage, onProfileChange }: { sessi
   const [profile, setProfile] = useState<Profile | null>(null);
   const loadProfile = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
     if (error) { onMessage(error.message); return; }
     const value = data as Profile | null;
     if (value?.avatar_path) {
@@ -294,7 +294,7 @@ function AccountBar({ session, profile, onProfileChange, onMessage }: { session:
     finally { setBusy(false); }
   };
   const canManageAccount = Boolean(profile && effectiveProfileStatus(profile) === 'active');
-  return <section className="account-bar"><div className="account-avatar">{avatarPreview ? <img src={avatarPreview} alt="我的头像" /> : <Icon name="person" />}</div>{editing ? <form className="profile-edit" onSubmit={save}><label className="avatar-upload">更换头像<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)} /></label><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} aria-label="昵称" maxLength={40} placeholder="昵称" required /><input value={bio} onChange={(event) => setBio(event.target.value)} aria-label="个人简介" maxLength={240} placeholder="一句话介绍自己" /><button className="primary-button compact" disabled={busy}>{busy ? '保存中…' : '保存'}</button></form> : <div className="account-copy"><b>{profile?.display_name ?? session.user.email}</b><small>{session.user.email}{profile?.bio ? ` · ${profile.bio}` : ''}</small></div>}{canManageAccount && <><button className="icon-button" onClick={() => { if (editing) setAvatarFile(null); setEditing(!editing); }} aria-label="编辑个人资料"><Icon name="edit" /></button><button className="soft-button" onClick={() => setPasswordReset(!passwordReset)}><Icon name="key" />修改密码</button></>}{!canManageAccount && profile && <p className="account-restriction">当前账号状态下，资料修改和密码修改暂不可用。</p>}<button className="soft-button" onClick={() => void deleteAccount()}><Icon name="delete_forever" />注销账号</button><button className="soft-button" onClick={() => void logout()}><Icon name="logout" />退出</button>{passwordReset && canManageAccount && <form className="password-change" onSubmit={updatePassword}><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required placeholder="当前密码" /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="新密码（至少 8 位）" /><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="再次输入新密码" /><button className="primary-button compact" disabled={busy}>{busy ? '更新中…' : '确认修改'}</button></form>}</section>;
+  return <section className="account-bar"><div className="account-avatar">{avatarPreview ? <img src={avatarPreview} alt="我的头像" /> : <Icon name="person" />}</div>{editing ? <form className="profile-edit" onSubmit={save}><label className="avatar-upload">更换头像<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)} /></label><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} aria-label="昵称" maxLength={40} placeholder="昵称" required /><input value={bio} onChange={(event) => setBio(event.target.value)} aria-label="个人简介" maxLength={240} placeholder="一句话介绍自己" /><button className="primary-button compact" disabled={busy}>{busy ? '保存中…' : '保存'}</button></form> : <div className="account-copy"><b>{profile?.display_name ?? '账号用户'}</b><small>UID {profile?.uid ?? '加载中'} · {maskEmail(session.user.email)}{profile?.bio ? ` · ${profile.bio}` : ''}</small></div>}{canManageAccount && <><button className="icon-button" onClick={() => { if (editing) setAvatarFile(null); setEditing(!editing); }} aria-label="编辑个人资料"><Icon name="edit" /></button><button className="soft-button" onClick={() => setPasswordReset(!passwordReset)}><Icon name="key" />修改密码</button></>}{!canManageAccount && profile && <p className="account-restriction">当前账号状态下，资料修改和密码修改暂不可用。</p>}<button className="soft-button" onClick={() => void deleteAccount()}><Icon name="delete_forever" />注销账号</button><button className="soft-button" onClick={() => void logout()}><Icon name="logout" />退出</button>{passwordReset && canManageAccount && <form className="password-change" onSubmit={updatePassword}><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required placeholder="当前密码" /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="新密码（至少 8 位）" /><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="再次输入新密码" /><button className="primary-button compact" disabled={busy}>{busy ? '更新中…' : '确认修改'}</button></form>}</section>;
 }
 
 function Composer({ userId, onPosted, onError }: { userId: string; onPosted: () => void; onError: (message: string) => void }) {
@@ -352,6 +352,13 @@ function PostCard({ post, session, profile, onRefresh, onError, onTopic, onOpenP
 function renderHashtags(body: string, topics: Topic[], onTopic: (topic: Topic) => void) {
   const pieces = body.split(/(#[\p{L}\p{N}_-]{1,30})/gu);
   return pieces.map((piece, index) => { if (!piece.startsWith('#')) return <span key={index}>{piece}</span>; const topic = topics.find((item) => item.title.toLocaleLowerCase() === piece.slice(1).toLocaleLowerCase()); return topic ? <button className="inline-hashtag" key={index} onClick={() => onTopic(topic)}>{piece}</button> : <span className="inline-hashtag-text" key={index}>{piece}</span>; });
+}
+
+function maskEmail(email?: string) {
+  if (!email) return '邮箱已隐藏';
+  const [local, domain] = email.split('@');
+  if (!domain) return '邮箱已隐藏';
+  return `${local.slice(0, Math.min(2, local.length))}***@${domain}`;
 }
 
 function effectiveProfileStatus(profile: Pick<Profile, 'account_status' | 'suspension_expires_at'>) {

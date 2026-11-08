@@ -41,11 +41,13 @@ npm run dev
 
 验证邮箱后可发布文字和图片动态、添加 `#话题`、添加评论、表情、点赞、关注作者和举报内容。点击动态或评论作者可查看公开主页、简介、动态与关注数据，也可关注/取消关注或举报账号。动态图片最多 9 张，单张 5 MB；评论图片最多 4 张。删除自己的动态或评论时会先隐藏内容，再通过服务端清理关联图片；如果图片清理失败，内容会保持隐藏并提示重试。删除账号会永久删除线上社区内容和媒体，但保留本机生活记录。
 
-登录后可编辑社区昵称、个人简介和头像。头像支持 JPG、PNG、WebP，单张不超过 2 MB；保存成功后会显示在个人资料、动态和评论旁。“我的 → 账号设置”可查看本人举报状态、修改密码、退出或注销账号。修改密码需要输入当前密码、新密码并再次确认；忘记当前密码时使用登录卡片中的“忘记密码”邮件重置。
+登录后可编辑社区昵称、个人简介和头像。每个账号有系统生成的短 UID；新用户昵称由系统随机生成，也可以自行修改。头像支持 JPG、PNG、WebP，单张不超过 2 MB；保存成功后会显示在个人资料、动态和评论旁。公开主页显示 UID，不显示邮箱。“我的 → 账号设置”显示本人邮箱的掩码形式，并可查看 UID、举报状态、修改密码、退出或注销账号。修改密码需要输入当前密码、新密码并再次确认；忘记当前密码时使用登录卡片中的“忘记密码”邮件重置。
 
 ### 管理后台
 
-管理员从独立地址 `/#/admin` 进入桌面管理工作台；普通用户打开该地址会被拒绝。工作台默认显示举报队列和对象详情，可检索举报、动态和评论，隐藏/恢复内容，或移除内容并删除图片。暂停账号可选择 24 小时、7 天或 30 天，到期后自动恢复社区写权限；永久封禁是独立状态，只能由管理员手动解封。隐藏和暂停直接执行，移除内容和永久封禁需二次确认；所有操作均要求填写原因并写入包含管理员、目标、动作、原因和时间的审计记录。管理员角色须由项目拥有者在 Supabase SQL Editor 手工授予。
+后台独立地址为 `https://admin.yeecc.cn/`，普通 App 的旧 `/#/admin` 地址会跳转过去。后台登录页只提供已授权账号的邮箱/密码登录和忘记密码，没有注册功能。重置密码邮件返回后台域名；普通用户即使能登录也无法进入工作台。管理员可以在账号管理中查看完整邮箱、按 UID 或邮箱查找已注册账号，并添加或撤销管理员权限；每次角色变更需二次确认、填写原因并写入操作记录。首次管理员仍由项目所有者在 Supabase SQL Editor 手工授予。
+
+工作台默认显示举报队列和对象详情，可检索举报、动态和评论，隐藏/恢复内容，或移除内容并删除图片。暂停账号可选择 24 小时、7 天或 30 天，到期后自动恢复社区写权限；永久封禁是独立状态，只能由管理员手动解封。隐藏和暂停直接执行，移除内容和永久封禁需二次确认；所有审核操作均填写原因并写入包含管理员、目标、动作、原因和时间的审计记录。
 
 ### 本机备份
 
@@ -58,20 +60,23 @@ npm run dev
 ## 启用 Supabase 社区
 
 1. 创建 Supabase 项目。
-2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql` 与最新的 `supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`。如果前两份已执行，只执行第三份。
+2. SQL Editor 按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql` 和 `supabase/migrations/20261108130000_account_identity_admin_management.sql`。如果现有前三份已执行，只执行最后一份新迁移。
 3. 复制 `.env.example` 到 `.env.local`，填入 Project URL 与 anon/publishable key。
-4. 设置 Authentication 的邮箱验证与 redirect URL；配置站点 URL。
-5. 使用 Supabase CLI 登录、关联项目，并部署三个 Edge Function：
+4. 设置 Authentication 的邮箱验证与 redirect URL；配置站点 URL。Redirect URLs 需包含普通 App 的邮箱验证地址，以及后台密码恢复地址 `https://admin.yeecc.cn/`。
+5. 使用 Supabase CLI 登录、关联项目，并部署四个 Edge Function：
 
 ```bash
 supabase login
 supabase link --project-ref <project-ref>
 supabase functions deploy admin-moderate
+supabase functions deploy admin-manage
 supabase functions deploy delete-account
 supabase functions deploy delete-content
 ```
 
-6. 注册并验证管理员邮箱后，在 SQL Editor 以受信任账号执行：
+6. 在 Cloudflare 将 `admin.yeecc.cn` 作为现有 `richangyouxu` Worker 的另一个 Custom Domain 绑定，并确认 DNS、HTTPS 正常。前端会按 hostname 显示独立后台；`daily.yeecc.cn` 继续提供普通 App。
+
+7. 注册并验证首位管理员邮箱后，在 SQL Editor 以受信任账号执行：
 
 ```sql
 update public.profiles

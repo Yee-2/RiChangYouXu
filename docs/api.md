@@ -2,7 +2,7 @@
 
 版本：0.1.0  
 后端：Supabase Auth、PostgREST、Storage、Edge Functions  
-迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`
+迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108130000_account_identity_admin_management.sql`
 
 ## 连接与鉴权
 
@@ -23,6 +23,8 @@
 | 忘记密码 | `auth.resetPasswordForEmail(email, { redirectTo })` | 重置链接返回应用后，登录态可调用 `auth.updateUser({ password })` 设置新密码 |
 | 修改密码 | 先用 `auth.signInWithPassword({ email, password: currentPassword })` 验证当前密码，再调用 `auth.updateUser({ password: newPassword })` | 新密码至少 8 位，页面要求再次确认 |
 | 重发验证 | `auth.resend({ type: 'signup', email })` | 注册成功但未收到验证邮件时使用 |
+
+管理员登录使用同一 Supabase Auth 邮箱账号，只能从 `https://admin.yeecc.cn/` 登录；后台不提供注册。忘记密码调用 `auth.resetPasswordForEmail(email, { redirectTo: 'https://admin.yeecc.cn/' })`，需将该地址加入 Supabase Authentication → URL Configuration 的 Redirect URLs。后台登录后还要通过 `admin-manage` 服务端校验 active admin 角色；普通账号无法访问管理数据。
 
 ## 数据访问接口
 
@@ -77,11 +79,29 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 
 ### 用户资料
 
-`profiles` 可公开读取公开资料字段。用户只可更新自己的 `username`、`display_name`、`avatar_path`、`bio`；角色和账号状态不能由客户端修改。邮箱不存进公开 profile 表。资料编辑通过 `PATCH /rest/v1/profiles?id=eq.{uid}` 更新 `display_name`（1–40 字）、`bio`（最多 240 字）与 `avatar_path`。头像限 JPG/PNG/WebP、最大 2 MiB；先上传到 `{uid}/{uuid}.{ext}`，资料更新成功后才删除旧头像。失败时清理新文件并保留原资料。头像为社区可见资料。
+`profiles` 可公开读取公开资料字段。`uid` 是数据库生成的公开短 UID（`RY-` 前缀加 10 位十六进制字符），创建后不可修改；`id` 仍是内部 Auth UUID 和关系外键。新账号昵称由数据库触发器随机生成，用户可自行修改。用户只可更新自己的 `username`、`display_name`、`avatar_path`、`bio`；角色、UID 和账号状态不能由客户端修改。邮箱不存进公开 profile 表，也不由社区 REST 查询返回。普通用户的个人设置页对本人邮箱做掩码；完整邮箱只由管理员后台调用 `admin-manage` 读取。资料编辑通过 `PATCH /rest/v1/profiles?id=eq.{auth-uuid}` 更新 `display_name`（1–40 字）、`bio`（最多 240 字）与 `avatar_path`。头像限 JPG/PNG/WebP、最大 2 MiB；先上传到 `{auth-uuid}/{uuid}.{ext}`，资料更新成功后才删除旧头像。失败时清理新文件并保留原资料。头像与 UID 为社区可见资料。
 
 ## Edge Functions
 
 以下函数启用 JWT 验证，均要求 `Authorization: Bearer <access_token>`。
+
+### `POST /functions/v1/admin-manage`
+
+仅 active 管理员可调用。函数校验用户会话和 `profiles.role`；仅服务端使用 service-role key 调用数据库受限 RPC，读取完整邮箱或变更管理员角色。邮箱查询采用分页/精确查找，普通用户不能调用数据库 RPC。
+
+请求动作：
+
+```json
+{ "action": "verify" }
+{ "action": "list_accounts", "query": "RY-… 或邮箱/昵称", "limit": 100, "offset": 0 }
+{ "action": "find_account", "lookup": "RY-… 或完整邮箱" }
+{ "action": "grant_admin", "targetId": "auth-user-uuid", "reason": "职责需要" }
+{ "action": "revoke_admin", "targetId": "auth-user-uuid", "reason": "权限调整" }
+```
+
+`list_accounts` 返回 `{ "ok": true, "accounts": [...] }`，账号对象包含后台所需完整邮箱、UID、昵称、状态、角色和邮箱验证时间；每页最多 100 条。`find_account` 返回一个匹配账号。`grant_admin` 只接受状态正常且已验证邮箱的现有账号；`revoke_admin` 不能移除最后一位 active 管理员。角色更新与 `moderation_audit` 写入在同一数据库事务内完成；操作原因必填且最多 500 字。成功变更返回 `{ "ok": true }`。
+
+错误包括：`401 unauthorized`、`403 forbidden`、`404 account_not_found`、`400 target_not_eligible`、`400 already_admin`、`400 last_active_admin`、`400 invalid_request`。角色字段不能通过 PostgREST 客户端直接修改。
 
 ### `POST /functions/v1/admin-moderate`
 
@@ -139,4 +159,4 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 | 邮箱验证后普通用户 | 是 | 是 | 是 | 否 | 否 |
 | 暂停中账号 | 是 | 到期前否；到期后自动恢复 | 是 | 否 | 否 |
 | 永久封禁账号 | 是 | 否 | 是 | 否 | 否 |
-| 管理员 | 是 | 是 | 是 | 是 | 通过受保护 Edge Function |
+| 管理员 | 是 | 是 | 是 | 是 | 查看完整邮箱、添加/撤销管理员及管理用户和内容（受保护 Edge Function） |
