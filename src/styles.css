@@ -111,4 +111,7 @@
 .content-action-confirm textarea:focus{outline:2px solid color-mix(in srgb,var(--coral) 24%,transparent);border-color:var(--coral)}
 .report-parent-context{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:13px;background:var(--surface-2)}
 .report-parent-context .target-images{margin-bottom:0}
+.my-report-review-reason{display:grid;gap:3px;margin:8px 0 0;padding:8px 10px;border-left:3px solid var(--coral);border-radius:0 9px 9px 0;background:var(--surface-2);font-size:10px;line-height:1.55}
+.my-report-review-reason b{color:var(--coral-dark)}
+.my-report-review-reason span{color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:640px){.content-detail-meta{align-items:flex-start;flex-direction:column;gap:7px}.content-detail-actions{bottom:-16px;margin:16px -16px -16px;padding:11px 16px}.content-detail-actions>*{flex:1;justify-content:center}}

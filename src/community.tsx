@@ -8,7 +8,7 @@ export type Profile = { id: string; uid: string; username: string | null; displa
 type Topic = { id: string; slug: string; title: string };
 type Post = { id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; topics?: Topic[]; liked?: boolean; followed?: boolean; likes?: number; comments?: CommentItem[]; images?: string[] };
 type CommentItem = { id: string; post_id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; images?: string[] };
-type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: string; created_at: string };
+type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: string; review_reason?: string | null; created_at: string };
 
 export default function Community({ session, onOpenMy, initialProfileId, onExitUserProfile }: { session: Session | null; onOpenMy?: () => void; initialProfileId?: string | null; onExitUserProfile?: () => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -424,13 +424,13 @@ function MyReports({ session }: { session: Session }) {
   useEffect(() => {
     let active = true;
     if (!supabase) return;
-    void supabase.from('reports').select('id,reporter_id,target_type,target_id,reason,detail,status,created_at').eq('reporter_id', session.user.id).order('created_at', { ascending: false }).limit(100).then(({ data, error: queryError }) => {
+    void supabase.from('reports').select('id,reporter_id,target_type,target_id,reason,detail,status,review_reason,created_at').eq('reporter_id', session.user.id).order('created_at', { ascending: false }).limit(100).then(({ data, error: queryError }) => {
       if (!active) return;
       setReports((data ?? []) as Report[]); setError(queryError?.message ?? ''); setLoading(false);
     });
     return () => { active = false; };
   }, [session.user.id]);
-  return <section className="my-reports-card"><div className="section-heading"><div><p className="eyebrow">REPORT HISTORY</p><h2>我的举报</h2></div><Icon name="flag" /></div>{loading ? <p className="muted">正在读取举报记录…</p> : error ? <p className="form-error">{error}</p> : reports.length === 0 ? <p className="muted">你还没有提交过举报。</p> : <div className="my-report-list">{reports.map((report) => <article key={report.id}><div><b>{report.target_type === 'post' ? '动态' : report.target_type === 'comment' ? '评论' : '账号'} · {report.reason}</b><small>对象 ID：{report.target_id} · {new Date(report.created_at).toLocaleString('zh-CN')}</small></div><span className={`status-pill ${report.status}`}>{report.status === 'open' ? '处理中' : report.status === 'handled' ? '已处理' : '已驳回'}</span></article>)}</div>}</section>;
+  return <section className="my-reports-card"><div className="section-heading"><div><p className="eyebrow">REPORT HISTORY</p><h2>我的举报</h2></div><Icon name="flag" /></div>{loading ? <p className="muted">正在读取举报记录…</p> : error ? <p className="form-error">{error}</p> : reports.length === 0 ? <p className="muted">你还没有提交过举报。</p> : <div className="my-report-list">{reports.map((report) => <article key={report.id}><div><b>{report.target_type === 'post' ? '动态' : report.target_type === 'comment' ? '评论' : '账号'} · {report.reason}</b><small>对象 ID：{report.target_id} · {new Date(report.created_at).toLocaleString('zh-CN')}</small>{report.status === 'dismissed' && <p className="my-report-review-reason"><b>驳回理由</b><span>{report.review_reason?.trim() || '后台未填写驳回理由。'}</span></p>}</div><span className={`status-pill ${report.status}`}>{report.status === 'open' ? '处理中' : report.status === 'handled' ? '已处理' : '已驳回'}</span></article>)}</div>}</section>;
 }
 
 function CommunityWelcome({ onLogin }: { onLogin: () => void }) {

@@ -34,7 +34,7 @@ Deno.serve(async (request) => {
   const serviceClient = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
   const [adminResult, profileResult] = await Promise.all([
     serviceClient.from('admin_accounts').select('user_id,email').eq('user_id', userData.user.id).maybeSingle(),
-    serviceClient.from('profiles').select('id,uid,display_name,account_status').eq('id', userData.user.id).maybeSingle()
+    serviceClient.from('profiles').select('id,uid,display_name,avatar_path,account_status').eq('id', userData.user.id).maybeSingle()
   ]);
   const actor = adminResult.data;
   const actorProfile = profileResult.data;
@@ -60,7 +60,7 @@ Deno.serve(async (request) => {
 
   const action = input.action;
   if (action === 'verify') {
-    return response({ ok: true, actor: { id: actorProfile.id, uid: actorProfile.uid, display_name: actorProfile.display_name, email: userData.user.email ?? actor.email } }, 200, cors);
+    return response({ ok: true, actor: { id: actorProfile.id, uid: actorProfile.uid, display_name: actorProfile.display_name, avatar_path: actorProfile.avatar_path, email: userData.user.email ?? actor.email } }, 200, cors);
   }
 
   if (action === 'list_accounts' || action === 'list_admins' || action === 'list_users') {

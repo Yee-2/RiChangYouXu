@@ -105,7 +105,7 @@ Deno.serve(async (request) => {
 
   let reportUpdateFailure: string | null = null;
   if (reportId) {
-    const reportResult = await admin.from('reports').update({ status: action === 'dismiss_report' ? 'dismissed' : 'handled', reviewed_by: userData.user.id, reviewed_at: new Date().toISOString() }).eq('id', reportId).select('id').maybeSingle();
+    const reportResult = await admin.from('reports').update({ status: action === 'dismiss_report' ? 'dismissed' : 'handled', review_reason: action === 'dismiss_report' ? reason.trim() : null, reviewed_by: userData.user.id, reviewed_at: new Date().toISOString() }).eq('id', reportId).select('id').maybeSingle();
     if (reportResult.error) reportUpdateFailure = reportResult.error.message;
     else if (!reportResult.data) reportUpdateFailure = 'report_not_found';
   }
