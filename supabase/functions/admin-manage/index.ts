@@ -52,6 +52,7 @@ Deno.serve(async (request) => {
     reason?: string;
     statusFilter?: string;
     sort?: string;
+    registeredWithin?: string;
     newPassword?: string;
   };
   try { input = await request.json(); }
@@ -69,12 +70,19 @@ Deno.serve(async (request) => {
     const role = action === 'list_users' ? 'user' : 'admin';
     const statusFilter = role === 'user' && typeof input.statusFilter === 'string' ? input.statusFilter : 'all';
     const sort = role === 'user' && typeof input.sort === 'string' ? input.sort : 'newest';
+    const registeredWithin = role === 'user' && typeof input.registeredWithin === 'string' ? input.registeredWithin : 'all';
+    const registeredDays: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 };
+    if (role === 'user' && registeredWithin !== 'all' && !(registeredWithin in registeredDays)) {
+      return response({ error: 'invalid_registration_window' }, 400, cors);
+    }
+    const registeredAfter = registeredWithin === 'all' ? null : new Date(Date.now() - registeredDays[registeredWithin] * 24 * 60 * 60 * 1000).toISOString();
     const { data, error } = await serviceClient.rpc('admin_list_profiles_filtered', {
       p_actor_id: actorProfile.id,
       p_role: role,
       p_query: query || null,
       p_status_filter: statusFilter,
       p_sort: sort,
+      p_registered_after: registeredAfter,
       p_limit: limit,
       p_offset: offset
     });
@@ -119,17 +127,27 @@ Deno.serve(async (request) => {
     if (targetError) return response({ error: 'admin_operation_failed' }, 400, cors);
     if (!targetAdmin) return response({ error: 'target_not_admin' }, 404, cors);
 
-    const passwordResult = await serviceClient.auth.admin.updateUserById(targetId, { password: newPassword });
-    if (passwordResult.error) return response({ error: 'password_update_failed' }, 400, cors);
-    const auditResult = await serviceClient.from('moderation_audit').insert({
+    const auditIntent = await serviceClient.from('moderation_audit').insert({
       actor_id: actorProfile.id,
-      action: 'reset_admin_password',
+      action: 'reset_admin_password_started',
       target_type: 'admin',
       target_id: targetId,
       reason,
-      metadata: { credential_changed: true }
-    });
-    if (auditResult.error) return response({ error: 'password_updated_audit_failed', partial: true }, 500, cors);
+      metadata: { credential_changed: false, outcome: 'pending' }
+    }).select('id').single();
+    if (auditIntent.error || !auditIntent.data) return response({ error: 'password_reset_audit_intent_failed' }, 500, cors);
+
+    const passwordResult = await serviceClient.auth.admin.updateUserById(targetId, { password: newPassword });
+    const outcome = passwordResult.error
+      ? { action: 'reset_admin_password_failed', metadata: { credential_changed: false, outcome: 'failed' } }
+      : { action: 'reset_admin_password', metadata: { credential_changed: true, outcome: 'succeeded' } };
+    const auditResult = await serviceClient.from('moderation_audit').update(outcome)
+      .eq('id', auditIntent.data.id);
+    if (passwordResult.error) {
+      if (auditResult.error) return response({ error: 'password_update_failed_audit_outcome_failed', partial: true }, 500, cors);
+      return response({ error: 'password_update_failed' }, 400, cors);
+    }
+    if (auditResult.error) return response({ error: 'password_updated_audit_outcome_failed', partial: true }, 500, cors);
     return response({ ok: true }, 200, cors);
   }
 

@@ -19,8 +19,9 @@ Deno.serve(async (request) => {
   const { data, error } = await userClient.auth.getUser(token);
   if (error || !data.user) return reply({ error: 'unauthorized' }, 401);
   const admin = createClient(url, service, { auth: { persistSession: false } });
-  const { data: profile } = await admin.from('profiles').select('role').eq('id', data.user.id).maybeSingle();
-  if (profile?.role === 'admin') return reply({ error: 'admin_account_cannot_self_delete' }, 403);
+  const { data: adminMembership, error: adminMembershipError } = await admin.from('admin_accounts').select('user_id').eq('user_id', data.user.id).maybeSingle();
+  if (adminMembershipError) return reply({ error: 'admin_membership_check_failed' }, 500);
+  if (adminMembership) return reply({ error: 'admin_account_cannot_self_delete' }, 403);
 
   const paths: string[] = [];
   for (let offset = 0; ; offset += 1000) {

@@ -55,8 +55,8 @@ Cloudflare Workers 文档支持为同一 Worker 配置多个 Custom Domain；绑
 
 ### 4.3 忘记密码
 
-- 登录页提交邮箱后调用 Supabase Auth 密码重置，目标跳转为后台域名上的恢复页。
-- 恢复页校验 Supabase 的密码恢复会话后允许设置并确认新密码；没有有效恢复会话时提示重新申请邮件。
+- 登录页提交邮箱后，Supabase Auth 通过 Resend SMTP 发送密码恢复验证码；输入验证码并设置新密码后，服务端验证恢复 token 再更新密码。
+- 后台本人改密同样要求邮件验证码；管理员重置其他管理员密码仍由受保护的后台接口执行并记录原因。
 - Supabase URL Configuration 增加精确的后台恢复地址，例如 `https://admin.yeecc.cn/`（或实现中采用的固定恢复路径），不要使用不必要的宽泛通配符。
 - 邮箱提示采用不泄漏账号是否存在的通用文案。
 

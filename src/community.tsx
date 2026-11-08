@@ -129,27 +129,70 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
 }
 
 function AuthCard() {
-  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [pendingEmail, setPendingEmail] = useState('');
+  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login'); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState(''); const [challenge, setChallenge] = useState<'signup' | 'reset' | null>(null); const [otp, setOtp] = useState(''); const [newPassword, setNewPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
+  const { seconds: resendSeconds, start: startResendCooldown } = useOtpCooldown();
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!supabase) return; setBusy(true); setError(''); setMessage('');
-    const values = new FormData(event.currentTarget); const email = String(values.get('email') ?? '').trim(); const password = String(values.get('password') ?? '');
+    const values = new FormData(event.currentTarget); const formEmail = String(values.get('email') ?? '').trim(); const password = String(values.get('password') ?? '');
     try {
-      if (mode === 'signup') {
-        const { data, error: authError } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
+      if (challenge === 'signup' || challenge === 'reset') {
+        if (!/^\d{8}$/.test(otp)) throw new Error('请输入邮件中的 8 位数字验证码。');
+        if (challenge === 'reset') {
+          if (newPassword.length < 8) throw new Error('新密码至少需要 8 位。');
+          if (newPassword !== confirmPassword) throw new Error('两次输入的新密码不一致。');
+        }
+        const { error: verifyError } = await supabase.auth.verifyOtp({ email, token: otp, type: challenge === 'signup' ? 'signup' : 'recovery' });
+        if (verifyError) throw verifyError;
+        if (challenge === 'reset') {
+          const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+          if (updateError) throw updateError;
+          await supabase.auth.signOut();
+          setChallenge(null); setMode('login'); setOtp(''); setNewPassword(''); setConfirmPassword('');
+          setMessage('密码已重置，请使用新密码登录。');
+        } else {
+          setMessage('邮箱验证成功，账号已创建。');
+        }
+      } else if (mode === 'signup') {
+        const { data, error: authError } = await supabase.auth.signUp({ email: formEmail, password });
         if (authError) throw authError;
-        setPendingEmail(email);
-        setMessage(data.session ? '账号已创建并登录。' : '注册成功，请检查邮箱并点击验证链接，再回来登录。');
+        setEmail(formEmail);
+        if (data.session) setMessage('账号已创建并登录。');
+        else { setChallenge('signup'); startResendCooldown(); setMessage('验证码已发送到你的邮箱，请输入邮件中的 8 位数字验证码。'); }
       } else if (mode === 'login') {
-        const { error: authError } = await supabase.auth.signInWithPassword({ email, password }); if (authError) throw authError;
+        const { error: authError } = await supabase.auth.signInWithPassword({ email: formEmail, password }); if (authError) throw authError;
       } else {
-        const { error: authError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` }); if (authError) throw authError;
-        setMessage('如果该邮箱已注册，重置密码邮件会很快送达。');
+        const { error: authError } = await supabase.auth.resetPasswordForEmail(formEmail, { redirectTo: `${window.location.origin}/` }); if (authError) throw authError;
+        setEmail(formEmail); setChallenge('reset'); startResendCooldown();
+        setMessage('如果该邮箱对应账号，验证码会很快送达。');
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '操作失败，请重试。'); }
     finally { setBusy(false); }
   };
-  const resend = async () => { if (!supabase || !pendingEmail) return; const { error } = await supabase.auth.resend({ type: 'signup', email: pendingEmail }); setError(error?.message ?? ''); if (!error) setMessage('验证邮件已重新发送。'); };
-  return <section className="auth-card"><div><p className="eyebrow">日常有序账号</p><h2>{mode === 'login' ? '登录后继续' : mode === 'signup' ? '创建邮箱账号' : '找回密码'}</h2><p>使用邮箱和密码登录或注册，不需要手机号。</p></div><form className="auth-form" onSubmit={submit}><input name="email" type="email" autoComplete="email" placeholder="邮箱地址" required />{mode !== 'reset' && <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} placeholder="密码（至少 8 位）" required />}{error && <p className="form-error">{error}</p>}{message && <p className="form-success">{message}</p>}{pendingEmail && mode === 'signup' && <button type="button" className="text-button" onClick={() => void resend()}>重新发送验证邮件</button>}<button className="primary-button" disabled={busy}>{busy ? '请稍候…' : mode === 'signup' ? '注册并验证邮箱' : mode === 'reset' ? '发送重置邮件' : '邮箱登录'}</button><div className="auth-switch">{mode !== 'login' && <button type="button" onClick={() => { setMode('login'); setError(''); setMessage(''); }}>返回登录</button>}{mode === 'login' && <><button type="button" onClick={() => setMode('signup')}>创建账号</button><button type="button" onClick={() => setMode('reset')}>忘记密码</button></>}</div></form></section>;
+  const resend = async () => {
+    if (!supabase || !email || !challenge || resendSeconds > 0 || busy) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const result = challenge === 'signup'
+        ? await supabase.auth.resend({ type: 'signup', email })
+        : await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` });
+      if (result.error) throw result.error;
+      startResendCooldown(); setMessage('验证码已重新发送。');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '发送失败，请稍后重试。'); }
+    finally { setBusy(false); }
+  };
+  const changeMode = (next: 'login' | 'signup' | 'reset') => { setMode(next); setChallenge(null); setOtp(''); setError(''); setMessage(''); };
+  return <section className="auth-card"><div><p className="eyebrow">日常有序账号</p><h2>{challenge === 'signup' ? '验证邮箱' : challenge === 'reset' ? '验证码重置密码' : mode === 'login' ? '登录后继续' : mode === 'signup' ? '创建邮箱账号' : '找回密码'}</h2><p>{challenge ? `验证码已发送至 ${email}，请查看收件箱或垃圾邮件。` : '使用邮箱和密码登录或注册，不需要手机号。'}</p></div><form className="auth-form" onSubmit={submit}>{!challenge ? <><input name="email" type="email" autoComplete="email" placeholder="邮箱地址" value={email} onChange={(event) => setEmail(event.target.value)} required />{mode !== 'reset' && <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} placeholder="密码（至少 8 位）" required />}</> : <><label><span>邮箱验证码</span><input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="输入 8 位数字验证码" required /></label>{challenge === 'reset' && <><input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="新密码（至少 8 位）" required /><input type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" required /></>}</>}{error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}{challenge && <button type="button" className="text-button" disabled={busy || resendSeconds > 0} onClick={() => void resend()}>{resendSeconds > 0 ? `${resendSeconds} 秒后可重新发送` : '重新发送验证码'}</button>}<button className="primary-button" disabled={busy}>{busy ? '请稍候…' : challenge === 'signup' ? '验证邮箱并创建账号' : challenge === 'reset' ? '验证并更新密码' : mode === 'signup' ? '发送验证码并注册' : mode === 'reset' ? '发送验证码' : '邮箱登录'}</button><div className="auth-switch">{challenge ? <button type="button" onClick={() => { setChallenge(null); setOtp(''); setError(''); setMessage(''); }}>更换邮箱或返回</button> : mode !== 'login' ? <button type="button" onClick={() => changeMode('login')}>返回登录</button> : <><button type="button" onClick={() => changeMode('signup')}>创建账号</button><button type="button" onClick={() => changeMode('reset')}>忘记密码</button></>}</div></form></section>;
+}
+
+export function useOtpCooldown() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (seconds <= 0) return;
+    const timer = window.setTimeout(() => setSeconds((current) => Math.max(0, current - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [seconds]);
+  return { seconds, start: () => setSeconds(60) };
 }
 
 export function AuthPage({ onBack }: { onBack: () => void }) {
@@ -392,7 +435,8 @@ export function AccountSettings({ session, onMessage, onProfileChange }: { sessi
 }
 
 function AccountBar({ session, profile, onProfileChange, onMessage }: { session: Session; profile: Profile | null; onProfileChange: () => void; onMessage: (message: string) => void }) {
-  const [editing, setEditing] = useState(false); const [passwordReset, setPasswordReset] = useState(false); const [displayName, setDisplayName] = useState(profile?.display_name ?? ''); const [bio, setBio] = useState(profile?.bio ?? ''); const [avatarFile, setAvatarFile] = useState<File | null>(null); const [busy, setBusy] = useState(false); const [currentPassword, setCurrentPassword] = useState(''); const [newPassword, setNewPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
+  const [editing, setEditing] = useState(false); const [passwordReset, setPasswordReset] = useState(false); const [passwordCodeSent, setPasswordCodeSent] = useState(false); const [passwordOtp, setPasswordOtp] = useState(''); const [displayName, setDisplayName] = useState(profile?.display_name ?? ''); const [bio, setBio] = useState(profile?.bio ?? ''); const [avatarFile, setAvatarFile] = useState<File | null>(null); const [busy, setBusy] = useState(false); const [newPassword, setNewPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
+  const { seconds: resendSeconds, start: startResendCooldown } = useOtpCooldown();
   const [avatarPreview, setAvatarPreview] = useState(profile?.avatar_url);
   useEffect(() => {
     if (!avatarFile) { setAvatarPreview(profile?.avatar_url); return; }
@@ -424,20 +468,33 @@ function AccountBar({ session, profile, onProfileChange, onMessage }: { session:
   };
   const logout = async () => { const { error } = await supabase!.auth.signOut(); onMessage(error?.message ?? '已退出登录'); };
   const deleteAccount = async () => { if (!supabase) return; const confirmation = window.prompt('删除账号会永久删除你的线上动态、评论、关注和图片；本机生活记录会保留。输入 DELETE 确认。'); if (confirmation !== 'DELETE') return; const { data, error } = await supabase.functions.invoke('delete-account', { body: { confirmation } }); if (error || data?.error) { onMessage(error?.message ?? data.error); return; } await supabase.auth.signOut(); onMessage('社区账号和线上内容已删除；本机生活记录仍保留。'); };
+  const requestPasswordOtp = async () => {
+    if (!supabase || busy || resendSeconds > 0) return;
+    const email = session.user.email;
+    if (!email) { onMessage('当前账号没有可用邮箱，无法发送验证码。'); return; }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/` });
+      if (error) throw error;
+      setPasswordCodeSent(true); startResendCooldown(); onMessage('密码验证码已发送到你的邮箱。');
+    } catch (cause) { onMessage(cause instanceof Error ? cause.message : '验证码发送失败，请重试。'); }
+    finally { setBusy(false); }
+  };
   const updatePassword = async (event: FormEvent) => {
     event.preventDefault(); if (!supabase || busy) return;
+    if (!/^\d{8}$/.test(passwordOtp)) { onMessage('请输入邮件中的 8 位数字验证码。'); return; }
     if (newPassword.length < 8) { onMessage('新密码至少需要 8 位。'); return; }
     if (newPassword !== confirmPassword) { onMessage('两次输入的新密码不一致。'); return; }
     setBusy(true);
     try {
-      const { error: verifyError } = await supabase.auth.signInWithPassword({ email: session.user.email ?? '', password: currentPassword }); if (verifyError) throw new Error('当前密码不正确，请重新输入。');
+      const { error: verifyError } = await supabase.auth.verifyOtp({ email: session.user.email ?? '', token: passwordOtp, type: 'recovery' }); if (verifyError) throw verifyError;
       const { error } = await supabase.auth.updateUser({ password: newPassword }); if (error) throw error;
-      onMessage('密码已更新'); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setPasswordReset(false);
+      onMessage('密码已更新'); setPasswordOtp(''); setNewPassword(''); setConfirmPassword(''); setPasswordCodeSent(false); setPasswordReset(false);
     } catch (cause) { onMessage(cause instanceof Error ? cause.message : '密码更新失败，请重试。'); }
     finally { setBusy(false); }
   };
   const canManageAccount = Boolean(profile && effectiveProfileStatus(profile) === 'active');
-  return <section className="account-bar"><div className="account-avatar">{avatarPreview ? <img src={avatarPreview} alt="我的头像" /> : <Icon name="person" />}</div>{editing ? <form className="profile-edit" onSubmit={save}><label className="avatar-upload">更换头像<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)} /></label><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} aria-label="昵称" maxLength={40} placeholder="昵称" required /><input value={bio} onChange={(event) => setBio(event.target.value)} aria-label="个人简介" maxLength={240} placeholder="一句话介绍自己" /><button className="primary-button compact" disabled={busy}>{busy ? '保存中…' : '保存'}</button></form> : <div className="account-copy"><b>{profile?.display_name ?? '账号用户'}</b><small>UID {profile?.uid ?? '加载中'} · {maskEmail(session.user.email)}{profile?.bio ? ` · ${profile.bio}` : ''}</small></div>}{canManageAccount && <><button className="icon-button" onClick={() => { if (editing) setAvatarFile(null); setEditing(!editing); }} aria-label="编辑个人资料"><Icon name="edit" /></button><button className="soft-button" onClick={() => setPasswordReset(!passwordReset)}><Icon name="key" />修改密码</button></>}{!canManageAccount && profile && <p className="account-restriction">当前账号状态下，资料修改和密码修改暂不可用。</p>}<button className="soft-button" onClick={() => void deleteAccount()}><Icon name="delete_forever" />注销账号</button><button className="soft-button" onClick={() => void logout()}><Icon name="logout" />退出</button>{passwordReset && canManageAccount && <form className="password-change" onSubmit={updatePassword}><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required placeholder="当前密码" /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="新密码（至少 8 位）" /><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="再次输入新密码" /><button className="primary-button compact" disabled={busy}>{busy ? '更新中…' : '确认修改'}</button></form>}</section>;
+  return <section className="account-bar"><div className="account-avatar">{avatarPreview ? <img src={avatarPreview} alt="我的头像" /> : <Icon name="person" />}</div>{editing ? <form className="profile-edit" onSubmit={save}><label className="avatar-upload">更换头像<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)} /></label><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} aria-label="昵称" maxLength={40} placeholder="昵称" required /><input value={bio} onChange={(event) => setBio(event.target.value)} aria-label="个人简介" maxLength={240} placeholder="一句话介绍自己" /><button className="primary-button compact" disabled={busy}>{busy ? '保存中…' : '保存'}</button></form> : <div className="account-copy"><b>{profile?.display_name ?? '账号用户'}</b><small>UID {profile?.uid ?? '加载中'} · {maskEmail(session.user.email)}{profile?.bio ? ` · ${profile.bio}` : ''}</small></div>}{canManageAccount && <><button className="icon-button" onClick={() => { if (editing) setAvatarFile(null); setEditing(!editing); }} aria-label="编辑个人资料"><Icon name="edit" /></button><button className="soft-button" onClick={() => { const next = !passwordReset; setPasswordReset(next); setPasswordCodeSent(false); setPasswordOtp(''); setNewPassword(''); setConfirmPassword(''); }}><Icon name="key" />修改密码</button></>}{!canManageAccount && profile && <p className="account-restriction">当前账号状态下，资料修改和密码修改暂不可用。</p>}<button className="soft-button" onClick={() => void deleteAccount()}><Icon name="delete_forever" />注销账号</button><button className="soft-button" onClick={() => void logout()}><Icon name="logout" />退出</button>{passwordReset && canManageAccount && <div className="password-change">{!passwordCodeSent ? <><p>我们会向 {maskEmail(session.user.email)} 发送一次性验证码。</p><button type="button" className="primary-button compact" disabled={busy} onClick={() => void requestPasswordOtp()}>{busy ? '发送中…' : '发送验证码'}</button></> : <form onSubmit={updatePassword}><label><span>邮箱验证码</span><input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} value={passwordOtp} onChange={(event) => setPasswordOtp(event.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="输入 8 位数字验证码" required /></label><button type="button" className="text-button" disabled={busy || resendSeconds > 0} onClick={() => void requestPasswordOtp()}>{resendSeconds > 0 ? `${resendSeconds} 秒后可重发` : '重新发送验证码'}</button><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="新密码（至少 8 位）" /><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} autoComplete="new-password" required placeholder="再次输入新密码" /><button className="primary-button compact" disabled={busy}>{busy ? '验证并更新中…' : '验证并修改密码'}</button></form>}</div>}</section>;
 }
 
 function Composer({ userId, onPosted, onError }: { userId: string; onPosted: () => void; onError: (message: string) => void }) {

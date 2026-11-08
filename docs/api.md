@@ -2,7 +2,7 @@
 
 版本：0.1.0  
 后端：Supabase Auth、PostgREST、Storage、Edge Functions  
-迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108093526_separate_admin_accounts_and_filters.sql`
+迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`
 
 ## 连接与鉴权
 
@@ -17,14 +17,16 @@
 
 | 操作 | SDK | 说明 |
 |---|---|---|
-| 注册 | `auth.signUp({ email, password })` | 默认要求邮件验证；验证邮件由 Supabase Auth 邮件配置发送 |
+| 注册 | `auth.signUp({ email, password })` 后调用 `auth.verifyOtp({ email, token, type: 'signup' })` | 注册先发送 8 位验证码；验证码 10 分钟有效，每 60 秒可重发。确认模板由 Supabase Auth 管理，SMTP 通过 Resend 投递 |
 | 登录 | `auth.signInWithPassword({ email, password })` | 未验证邮箱通常不能获得可用会话 |
 | 退出 | `auth.signOut()` | 清除本机 Supabase 会话 |
-| 忘记密码 | `auth.resetPasswordForEmail(email, { redirectTo })` | 重置链接返回应用后，登录态可调用 `auth.updateUser({ password })` 设置新密码 |
-| 修改密码 | 先用 `auth.signInWithPassword({ email, password: currentPassword })` 验证当前密码，再调用 `auth.updateUser({ password: newPassword })` | 新密码至少 8 位，页面要求再次确认 |
-| 重发验证 | `auth.resend({ type: 'signup', email })` | 注册成功但未收到验证邮件时使用 |
+| 忘记密码 | `auth.resetPasswordForEmail(email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })` | 先验证 8 位邮箱验证码，再设置并确认至少 8 位的新密码；验证码 10 分钟有效 |
+| 修改密码 | `auth.resetPasswordForEmail(session.user.email)`、`auth.verifyOtp({ email, token, type: 'recovery' })`、`auth.updateUser({ password })` | 本人账号页及管理员本人密码修改均需验证邮件验证码；管理员在后台重置其他管理员密码仍由服务端 Auth Admin API 执行并记录原因 |
+| 重发注册验证码 | `auth.resend({ type: 'signup', email })` | 页面 60 秒倒计时后允许重新发送 |
 
-管理员登录使用 Supabase Auth 邮箱账号，只能从 `https://admin.yeecc.cn/` 登录；后台不提供注册。管理员权限唯一来源为启用 RLS 的 `public.admin_accounts` 表，普通用户没有该表的读写权限；`profiles.role` 仅作兼容字段，不能单独授予后台权限。忘记密码调用 `auth.resetPasswordForEmail(email, { redirectTo: 'https://admin.yeecc.cn/' })`，需将该地址加入 Supabase Authentication → URL Configuration 的 Redirect URLs。
+管理员登录使用 Supabase Auth 邮箱账号，只能从 `https://admin.yeecc.cn/` 登录；后台不提供注册。管理员权限唯一来源为启用 RLS 的 `public.admin_accounts` 表，普通用户没有该表的读写权限；`profiles.role` 仅作兼容字段，不能单独授予后台权限。后台忘记密码用同一 Resend 邮件发送验证码，不使用密码重置链接；后台地址保留在 Supabase Authentication → URL Configuration 的 Redirect URLs 中，以兼容现有会话与历史链接。
+
+Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 SMTP 设置为主机 `smtp.resend.com`、端口 `465`、用户名 `resend`、发件地址 `no-reply@yeecc.cn`；Resend API key 只保存在 Supabase Auth 的 SMTP 密码配置，不放入前端环境变量或 Git。验证码为 8 位数字，有效期 10 分钟，发送间隔至少 60 秒。`npx.cmd supabase config push --yes` 用于推送本仓库中的验证码有效期和邮件模板；SMTP 凭据需在 Supabase Dashboard 的 Authentication → SMTP Settings 配置，或通过 Supabase Management API 配置。模板分别为 `supabase/templates/confirmation.html`、`supabase/templates/recovery.html`。
 
 ## 数据访问接口
 
@@ -102,7 +104,7 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 { "action": "reset_admin_password", "targetId": "auth-user-uuid", "newPassword": "至少 8 位", "reason": "凭据重置" }
 ```
 
-`list_accounts`、`list_users` 与 `list_admins` 每页最多返回 100 条；普通用户支持按账号状态筛选和按注册时间新旧排序。账号对象仅通过受保护后台接口返回完整邮箱。`find_account` 只查找现有普通用户。`grant_admin` 只接受状态正常且邮箱已验证的现有普通账号，并将身份写入独立的 `admin_accounts` 表；后台登录页没有注册入口。`revoke_admin` 不能移除最后一位 active 管理员。`reset_admin_password` 仅可重置另一位管理员的密码，要求填写原因；密码经 Auth Admin API 更新，原因和目标写入 `moderation_audit`，旧密码不会读取或返回。角色授权/撤销与审计写入在同一数据库事务内完成；原因必填且最多 500 字。成功变更返回 `{ "ok": true }`。
+`list_accounts`、`list_users` 与 `list_admins` 每页最多返回 100 条；普通用户支持按账号状态、近 7/30/90 天注册范围筛选并按注册时间新旧排序。筛选按暂停到期后的有效状态判断。账号对象仅通过受保护后台接口返回完整邮箱。`find_account` 只查找现有普通用户。`grant_admin` 只接受状态正常且邮箱已验证的现有普通账号，并将身份写入独立的 `admin_accounts` 表；后台登录页没有注册入口。`revoke_admin` 不能移除最后一位 active 管理员。`reset_admin_password` 仅可重置另一位管理员的密码，要求填写原因；服务端先持久化重置意图，再调用 Auth Admin API 并写入操作结果，密码不会写入审计。角色授权/撤销与审计写入在同一数据库事务内完成；原因必填且最多 500 字。成功变更返回 `{ "ok": true }`。
 
 错误包括：`401 unauthorized`、`403 forbidden`、`404 account_not_found`、`400 target_not_eligible`、`400 already_admin`、`400 last_active_admin`、`400 invalid_request`。角色字段不能通过 PostgREST 客户端直接修改。
 

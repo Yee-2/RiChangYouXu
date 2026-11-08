@@ -20,6 +20,24 @@ site_url = "https://daily.yeecc.cn"
 enable_confirmations = true
 max_frequency = "1m0s"
 otp_length = 8
+otp_expiry = 600
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(RESEND_SMTP_PASSWORD)"
+admin_email = "no-reply@yeecc.cn"
+sender_name = "日常有序"
+
+[auth.email.template.confirmation]
+subject = "日常有序邮箱验证码"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "日常有序密码重置验证码"
+content_path = "./supabase/templates/recovery.html"
 
 [auth.sms]
 enable_confirmations = true
