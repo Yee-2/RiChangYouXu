@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { communityConfigured, supabase } from './supabase';
 import { Icon } from './Icon';
+import { useDismissibleDetails } from './useDismissibleDetails';
 
 export type Profile = { id: string; uid: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'banned' | 'deleted'; suspension_expires_at?: string | null };
 type Topic = { id: string; slug: string; title: string };
@@ -412,7 +413,7 @@ export function MyPostsPage({ session, onBack, onMessage }: { session: Session; 
       <div className="my-post-actions"><button type="button" className="soft-button" disabled={post.moderation_status !== 'visible'} onClick={() => { setEditing(post); setEditBody(post.body); }}><Icon name="edit" />编辑</button><button type="button" className="danger-button" onClick={() => void deletePost(post)}><Icon name="delete" />删除</button></div>
     </article>)}</div> : <div className="feed-empty"><Icon name="article" /><h3>还没有发布过动态</h3><p>你在社区发布的内容会集中显示在这里。</p></div>}
     {!loading && hasMore && <button className="load-more-button" disabled={loadingMore} onClick={() => void load(true)}>{loadingMore ? '加载中…' : '加载更多动态'}</button>}
-    {editing && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setEditing(null)}><section className="modal post-edit-modal" role="dialog" aria-modal="true" aria-label="编辑动态"><div className="modal-head"><h2>编辑动态</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setEditing(null)}><Icon name="close" /></button></div><form className="form-stack" onSubmit={(event) => void savePost(event)}><label className="field"><span>动态内容</span><textarea autoFocus rows={7} maxLength={5000} value={editBody} onChange={(event) => setEditBody(event.target.value)} placeholder="写下这条动态…" /></label><p className="muted">已发布的图片会保留；话题会按内容中的 #话题 自动同步。</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="my-post-actions"><button type="button" className="soft-button" onClick={() => setEditing(null)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : '保存修改'}</button></div></form></section></div>}
+    {editing && <div className="modal-backdrop" role="presentation" onPointerDown={(event) => event.target === event.currentTarget && setEditing(null)}><section className="modal post-edit-modal" role="dialog" aria-modal="true" aria-label="编辑动态"><div className="modal-head"><h2>编辑动态</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setEditing(null)}><Icon name="close" /></button></div><form className="form-stack" onSubmit={(event) => void savePost(event)}><label className="field"><span>动态内容</span><textarea autoFocus rows={7} maxLength={5000} value={editBody} onChange={(event) => setEditBody(event.target.value)} placeholder="写下这条动态…" /></label><p className="muted">已发布的图片会保留；话题会按内容中的 #话题 自动同步。</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="my-post-actions"><button type="button" className="soft-button" onClick={() => setEditing(null)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : '保存修改'}</button></div></form></section></div>}
   </section>;
 }
 
@@ -444,7 +445,27 @@ const communityEmojis = [
 ];
 
 function EmojiPicker({ onSelect }: { onSelect: (emoji: string) => void }) {
-  return <details className="emoji-picker"><summary><Icon name="mood" size={17} />表情</summary><div className="emoji-picker-popover" aria-label="表情选项">{communityEmojis.map((emoji, index) => <button type="button" key={`${emoji}-${index}`} aria-label={`插入${emoji}`} onClick={() => onSelect(emoji)}>{emoji}</button>)}</div></details>;
+  const pickerRef = useDismissibleDetails();
+  const selectEmoji = (emoji: string) => {
+    onSelect(emoji);
+    if (pickerRef.current) pickerRef.current.open = false;
+  };
+  return <details ref={pickerRef} className="emoji-picker"><summary><Icon name="mood" size={17} />表情</summary><div className="emoji-picker-popover" aria-label="表情选项">{communityEmojis.map((emoji, index) => <button type="button" key={`${emoji}-${index}`} aria-label={`插入${emoji}`} onClick={() => selectEmoji(emoji)}>{emoji}</button>)}</div></details>;
+}
+
+function PostActionsMenu({ isOwner, isHidden, onDelete, onReport }: { isOwner: boolean; isHidden: boolean; onDelete: () => void; onReport: () => void }) {
+  const menuRef = useDismissibleDetails();
+  const runAction = (event: MouseEvent<HTMLButtonElement>, action: () => void) => {
+    event.currentTarget.closest('details')?.removeAttribute('open');
+    action();
+  };
+  return <details ref={menuRef} className="post-more-menu">
+    <summary className="more-button" aria-label="动态操作菜单" aria-haspopup="menu"><Icon name="more_horiz" /></summary>
+    <div role="menu">{isOwner
+      ? <button type="button" role="menuitem" onClick={(event) => runAction(event, onDelete)}><Icon name="delete_forever" />{isHidden ? '继续删除动态' : '删除动态'}</button>
+      : <button type="button" role="menuitem" onClick={(event) => runAction(event, onReport)}><Icon name="flag" />举报动态</button>}
+    </div>
+  </details>;
 }
 
 export function AccountSettings({ session, onMessage, onProfileChange, onNavigate }: { session: Session; onMessage: (message: string) => void; onProfileChange: (profile: Profile | null) => void; onNavigate: (page: 'edit-profile' | 'change-password' | 'delete-account' | 'logout') => void }) {
@@ -649,7 +670,7 @@ function PostCard({ post, session, profile, onRefresh, onError, onTopic, onOpenP
   const follow = async () => { if (!supabase || !session) { onError('请先登录再关注用户。'); return; } const { data: existing } = await supabase.from('follows').select('follower_id').eq('follower_id', session.user.id).eq('followee_id', post.author_id).maybeSingle(); const result = existing ? await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('followee_id', post.author_id) : await supabase.from('follows').insert({ follower_id: session.user.id, followee_id: post.author_id }); if (result.error) onError(result.error.message); else onRefresh(); };
   const isFollowingSelf = session?.user.id === post.author_id;
   const followingText = post.followed ? '已关注' : '关注';
-  return <article className={`post-card ${post.moderation_status === 'hidden' ? 'post-pending-delete' : ''}`}><header className="post-head"><button className="post-author-link" onClick={() => onOpenProfile(post.author_id)} aria-label={`查看${name}的主页`}><div className="post-avatar">{post.profile?.avatar_url ? <img src={post.profile.avatar_url} alt="" /> : name.slice(0,1)}</div><div className="post-author"><b>{name}</b><small>{date}</small></div></button>{session && <>{!isFollowingSelf && post.moderation_status === 'visible' && <button className="follow-button" onClick={() => void follow()}><Icon name={post.followed ? 'person_check' : 'person_add'} />{followingText}</button>}{post.author_id === session.user.id && <button className="more-button" aria-label={post.moderation_status === 'hidden' ? '继续删除动态' : '删除动态'} onClick={() => void deletePost()}>{post.moderation_status === 'hidden' ? '继续删除' : <Icon name="more_horiz" />}</button>}{post.author_id !== session.user.id && post.moderation_status === 'visible' && <button className="more-button" aria-label="举报动态" onClick={() => void report('post', post.id)}><Icon name="more_horiz" /></button>}</>}</header>
+  return <article className={`post-card ${post.moderation_status === 'hidden' ? 'post-pending-delete' : ''}`}><header className="post-head"><button className="post-author-link" onClick={() => onOpenProfile(post.author_id)} aria-label={`查看${name}的主页`}><div className="post-avatar">{post.profile?.avatar_url ? <img src={post.profile.avatar_url} alt="" /> : name.slice(0,1)}</div><div className="post-author"><b>{name}</b><small>{date}</small></div></button>{session && <>{!isFollowingSelf && post.moderation_status === 'visible' && <button className="follow-button" onClick={() => void follow()}><Icon name={post.followed ? 'person_check' : 'person_add'} />{followingText}</button>}{(post.author_id === session.user.id || post.moderation_status === 'visible') && <PostActionsMenu isOwner={post.author_id === session.user.id} isHidden={post.moderation_status === 'hidden'} onDelete={() => void deletePost()} onReport={() => void report('post', post.id)} />}</>}</header>
     {post.moderation_status === 'hidden' && <div className="pending-delete-note"><Icon name="info" size={16} />这条内容正在清理图片，其他用户不可见。点击右上角“继续删除”完成清理。</div>}
     {post.body && <p className="post-body">{renderHashtags(post.body, post.topics ?? [], onTopic)}</p>}
     {post.images?.length ? <div className={`post-images count-${Math.min(post.images.length, 4)}`}>{post.images.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="动态图片" loading="lazy" /></a>)}</div> : null}
