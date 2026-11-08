@@ -38,12 +38,14 @@ Deno.serve(async (request) => {
   let metadata: Record<string, unknown> = reportId ? { report_id: reportId } : {};
 
   if (targetType === 'post' && ['hide_post', 'remove_post', 'restore_post'].includes(action)) {
-    const { data: target, error: targetError } = await admin.from('posts').select('image_paths').eq('id', targetId).maybeSingle();
+    const { data: target, error: targetError } = await admin.from('posts').select('image_paths,moderation_status').eq('id', targetId).maybeSingle();
     if (targetError) return response({ error: targetError.message }, 400);
     if (!target) return response({ error: 'target_not_found' }, 404);
+    if (target.moderation_status === 'removed') return response({ error: 'content_already_removed' }, 409);
     const status = action === 'hide_post' ? 'hidden' : action === 'remove_post' ? 'hidden' : 'visible';
-    const updated = await admin.from('posts').update({ moderation_status: status }).eq('id', targetId);
+    const updated = await admin.from('posts').update({ moderation_status: status }).eq('id', targetId).neq('moderation_status', 'removed').select('id').maybeSingle();
     if (updated.error) return response({ error: updated.error.message }, 400);
+    if (!updated.data) return response({ error: 'content_already_removed' }, 409);
     if (action === 'remove_post') {
       const { data: relatedComments, error: commentsError } = await admin.from('comments').select('id,image_paths').eq('post_id', targetId);
       if (commentsError) return response({ error: commentsError.message, partial: true }, 400);
@@ -58,12 +60,14 @@ Deno.serve(async (request) => {
       metadata = { ...metadata, removed_media_count: paths.length, removed_comment_count: relatedComments?.length ?? 0 };
     }
   } else if (targetType === 'comment' && ['hide_comment', 'remove_comment', 'restore_comment'].includes(action)) {
-    const { data: target, error: targetError } = await admin.from('comments').select('image_paths').eq('id', targetId).maybeSingle();
+    const { data: target, error: targetError } = await admin.from('comments').select('image_paths,moderation_status').eq('id', targetId).maybeSingle();
     if (targetError) return response({ error: targetError.message }, 400);
     if (!target) return response({ error: 'target_not_found' }, 404);
+    if (target.moderation_status === 'removed') return response({ error: 'content_already_removed' }, 409);
     const status = action === 'hide_comment' || action === 'remove_comment' ? 'hidden' : 'visible';
-    const updated = await admin.from('comments').update({ moderation_status: status }).eq('id', targetId);
+    const updated = await admin.from('comments').update({ moderation_status: status }).eq('id', targetId).neq('moderation_status', 'removed').select('id').maybeSingle();
     if (updated.error) return response({ error: updated.error.message }, 400);
+    if (!updated.data) return response({ error: 'content_already_removed' }, 409);
     if (action === 'remove_comment') {
       const removeError = await removeMedia(admin, target.image_paths ?? []);
       if (removeError) return response({ error: removeError, partial: true }, 400);

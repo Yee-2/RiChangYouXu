@@ -8,11 +8,12 @@ import { useDismissibleDetails } from './useDismissibleDetails';
 type AdminSection = 'reports' | 'content' | 'users' | 'admins' | 'audit';
 type PageKey = 'reports' | 'profiles' | 'users' | 'admins' | 'audit' | 'posts' | 'comments';
 type AdminProfile = Profile & { email?: string; email_confirmed_at?: string | null; suspension_expires_at: string | null; created_at: string };
-type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: 'open' | 'handled' | 'dismissed'; created_at: string; reviewed_at?: string | null };
-type ContentRow = { id: string; target_type: 'post' | 'comment'; author_id: string; body: string; image_paths: string[]; moderation_status: 'visible' | 'hidden' | 'removed'; created_at: string; post_id?: string };
+type Report = { id: string; reporter_id: string; reporter_uid?: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: 'open' | 'handled' | 'dismissed'; created_at: string; reviewed_at?: string | null };
+type ContentRow = { id: string; target_type: 'post' | 'comment'; author_id: string; body: string; image_paths: string[]; moderation_status: 'visible' | 'hidden' | 'removed'; created_at: string; updated_at?: string; post_id?: string };
 type AuditRow = { id: string; actor_id: string; target_type: string; target_id: string; action: string; reason: string; created_at: string };
-type ReportTarget = { profile?: AdminProfile; content?: ContentRow; images: string[]; error?: string };
+type ReportTarget = { profile?: AdminProfile; author?: AdminProfile; content?: ContentRow; parentPost?: ContentRow; images: string[]; parentImages?: string[]; error?: string };
 type AdminMetrics = { openReports: number; hiddenContent: number; restrictedAccounts: number; handledToday: number };
+type PerformAdminAction = (action: string, targetType: string, targetId: string, options?: { reportId?: string; suspensionHours?: number }, reason?: string) => Promise<void>;
 type AdminIdentity = { id: string; uid: string; display_name: string; email: string };
 type UserStatusFilter = 'all' | 'active' | 'suspended' | 'banned' | 'deleted';
 type RegistrationSort = 'newest' | 'oldest';
@@ -45,6 +46,15 @@ async function attachAvatarUrls<T extends Pick<AdminProfile, 'avatar_path' | 'ac
       avatar_url: row.account_status !== 'deleted' && row.avatar_path ? signedByPath.get(row.avatar_path) : undefined
     }))
   };
+}
+
+async function attachReporterUids(rows: Report[]) {
+  if (!supabase || !rows.length) return { rows };
+  const reporterIds = [...new Set(rows.map((row) => row.reporter_id))];
+  const { data, error } = await supabase.from('profiles').select('id,uid').in('id', reporterIds);
+  if (error) return { rows, error: error.message };
+  const uidById = new Map((data ?? []).map((profile) => [profile.id, profile.uid]));
+  return { rows: rows.map((row) => ({ ...row, reporter_uid: uidById.get(row.reporter_id) })) };
 }
 
 const sections: Array<{ id: AdminSection; label: string; icon: string }> = [
@@ -114,7 +124,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       supabase.functions.invoke('admin-manage', { body: { action: 'list_admins', limit: 100, offset: 0 } }),
       supabase.functions.invoke('admin-manage', { body: { action: 'list_users', limit: 100, offset: 0, statusFilter: userStatusFilter, sort: registrationSort, registeredWithin: registrationWindow } }),
       supabase.from('moderation_audit').select('id,actor_id,target_type,target_id,action,reason,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(200),
-      supabase.from('posts').select('id,author_id,body,image_paths,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100),
+      supabase.from('posts').select('id,author_id,body,image_paths,moderation_status,created_at,updated_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100),
       supabase.from('comments').select('id,post_id,author_id,body,image_paths,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(150),
       supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'open'),
       supabase.from('posts').select('id', { count: 'exact', head: true }).eq('moderation_status', 'hidden'),
@@ -129,7 +139,9 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     }
     setMetrics({ openReports: openCountResult.count ?? 0, hiddenContent: (hiddenPostsResult.count ?? 0) + (hiddenCommentsResult.count ?? 0), restrictedAccounts: restrictedCountResult.count ?? 0, handledToday: handledTodayResult.count ?? 0 });
     const nextReports = (reportResult.data ?? []) as Report[];
-    setReports(nextReports);
+    const reportsWithUids = await attachReporterUids(nextReports);
+    if (!firstError && reportsWithUids.error) setError(`举报人 UID 读取失败：${reportsWithUids.error}`);
+    setReports(reportsWithUids.rows);
     const nextProfiles = (profileResult.data ?? []) as AdminProfile[];
     const nextAccounts = ((adminResult.data as { admins?: AdminProfile[] } | null)?.admins ?? []);
     const nextUsers = ((userResult.data as { users?: AdminProfile[] } | null)?.users ?? []);
@@ -191,7 +203,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     if (section === 'reports') {
       const start = offsets.reports; const { data, error: queryError } = await supabase.from('reports').select('*').order('status', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false }).range(start, start + 99);
       if (queryError) setError(queryError.message);
-      const rows = (data ?? []) as Report[]; setReports((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, reports: start + rows.length })); setHasMore((current) => ({ ...current, reports: rows.length === 100 }));
+      const rows = (data ?? []) as Report[]; const enriched = await attachReporterUids(rows); if (enriched.error) setError(`举报人 UID 读取失败：${enriched.error}`); setReports((current) => [...current, ...enriched.rows]); setOffsets((current) => ({ ...current, reports: start + rows.length })); setHasMore((current) => ({ ...current, reports: rows.length === 100 }));
     } else if (section === 'users' || section === 'admins') {
       const role = section === 'users' ? 'user' : 'admin';
       const pageKey = role === 'user' ? 'users' : 'admins';
@@ -211,8 +223,8 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       const rows = (data ?? []) as AuditRow[]; setAudit((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, audit: start + rows.length })); setHasMore((current) => ({ ...current, audit: rows.length === 200 }));
     } else {
       const [postResult, commentResult] = await Promise.all([
-        supabase.from('posts').select('id,author_id,body,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).range(offsets.posts, offsets.posts + 99),
-        supabase.from('comments').select('id,post_id,author_id,body,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).range(offsets.comments, offsets.comments + 149)
+        supabase.from('posts').select('id,author_id,body,image_paths,moderation_status,created_at,updated_at').order('created_at', { ascending: false }).order('id', { ascending: false }).range(offsets.posts, offsets.posts + 99),
+        supabase.from('comments').select('id,post_id,author_id,body,image_paths,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).range(offsets.comments, offsets.comments + 149)
       ]);
       if (postResult.error || commentResult.error) setError(postResult.error?.message ?? commentResult.error?.message ?? '内容读取失败。');
       const posts = (postResult.data ?? []) as Array<Omit<ContentRow, 'target_type'>>; const comments = (commentResult.data ?? []) as Array<Omit<ContentRow, 'target_type'>>;
@@ -250,16 +262,41 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
           return;
         }
         const table = selectedReport.target_type === 'post' ? 'posts' : 'comments';
-        const { data, error: queryError } = await supabase.from(table).select('id,post_id,author_id,body,image_paths,moderation_status,created_at').eq('id', selectedReport.target_id).maybeSingle();
+        const select = selectedReport.target_type === 'post' ? 'id,author_id,body,image_paths,moderation_status,created_at,updated_at' : 'id,post_id,author_id,body,image_paths,moderation_status,created_at';
+        const { data, error: queryError } = await supabase.from(table).select(select).eq('id', selectedReport.target_id).maybeSingle();
         if (queryError) throw queryError;
         const contentItem = data ? { ...data, target_type: selectedReport.target_type } as ContentRow : undefined;
+        let author: AdminProfile | undefined;
+        if (contentItem) {
+          const { data: authorData, error: authorError } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at,created_at').eq('id', contentItem.author_id).maybeSingle();
+          if (authorError) throw authorError;
+          author = authorData as AdminProfile | undefined;
+          if (author?.avatar_path) {
+            const { data: signedAvatar } = await supabase.storage.from('community-media').createSignedUrl(author.avatar_path, 1800);
+            author.avatar_url = signedAvatar?.signedUrl;
+          }
+        }
         let images: string[] = [];
         if (contentItem?.image_paths?.length) {
           const { data: signed, error: imageError } = await supabase.storage.from('community-media').createSignedUrls(contentItem.image_paths, 1800);
           if (imageError) throw imageError;
           images = (signed ?? []).map((item) => item.signedUrl ?? '').filter(Boolean);
         }
-        if (active) setTarget({ content: contentItem, images });
+        let parentPost: ContentRow | undefined;
+        let parentImages: string[] = [];
+        if (selectedReport.target_type === 'comment' && contentItem?.post_id) {
+          const { data: parentData, error: parentError } = await supabase.from('posts').select('id,author_id,body,image_paths,moderation_status,created_at,updated_at').eq('id', contentItem.post_id).maybeSingle();
+          if (parentError) throw parentError;
+          if (parentData) {
+            parentPost = { ...parentData, target_type: 'post' } as ContentRow;
+            if (parentPost.image_paths.length) {
+              const { data: signedParent, error: parentImageError } = await supabase.storage.from('community-media').createSignedUrls(parentPost.image_paths, 1800);
+              if (parentImageError) throw parentImageError;
+              parentImages = (signedParent ?? []).map((image) => image.signedUrl ?? '').filter(Boolean);
+            }
+          }
+        }
+        if (active) setTarget({ content: contentItem, author, parentPost, images, parentImages });
       } catch (cause) {
         if (active) setTarget({ images: [], error: cause instanceof Error ? cause.message : '举报对象暂时无法读取。' });
       }
@@ -267,16 +304,16 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     return () => { active = false; };
   }, [selectedReport?.id, access]);
 
-  const perform = async (action: string, targetType: string, targetId: string, options: { reportId?: string; suspensionHours?: number } = {}) => {
+  const perform = async (action: string, targetType: string, targetId: string, options: { reportId?: string; suspensionHours?: number } = {}, suppliedReason?: string) => {
     if (!supabase) return;
     const dangerous = ['remove_post', 'remove_comment', 'ban_user'].includes(action);
-    if (dangerous) {
+    if (dangerous && suppliedReason === undefined) {
       const warning = action === 'ban_user'
         ? '永久封禁该账号？账号将无法登录或发布内容，之后只能由管理员手动解封。'
         : '确认移除这条内容并删除其图片？该操作无法通过后台恢复图片。';
       if (!window.confirm(warning)) return;
     }
-    const reason = window.prompt('填写处理原因：')?.trim();
+    const reason = suppliedReason === undefined ? window.prompt('填写处理原因：')?.trim() : suppliedReason.trim();
     if (!reason) return;
     setError('');
     const { data, error: invokeError } = await supabase.functions.invoke('admin-moderate', {
@@ -344,29 +381,163 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
 
 function ReportDesk({ reports, selected, target, profiles, suspensionHours, setSuspensionHours, onSelect, onPerform, hasMore, loading, onLoadMore }: {
   reports: Report[]; selected: Report | null; target: ReportTarget | null; profiles: AdminProfile[]; suspensionHours: Record<string, number>; setSuspensionHours: (value: Record<string, number>) => void; onSelect: (id: string) => void; hasMore: boolean; loading: boolean; onLoadMore: () => void;
-  onPerform: (action: string, targetType: string, targetId: string, options?: { reportId?: string; suspensionHours?: number }) => Promise<void>;
+  onPerform: PerformAdminAction;
 }) {
   const [filter, setFilter] = useState<'open' | 'all'>('open');
+  const [pendingAction, setPendingAction] = useState<{ action: string; targetType: 'post' | 'comment'; targetId: string; reportId: string } | null>(null);
   const visible = reports.filter((item) => filter === 'all' || item.status === 'open');
-  const author = target?.content ? profiles.find((item) => item.id === target.content?.author_id) : undefined;
+  const author = target?.author ?? (target?.content ? profiles.find((item) => item.id === target.content?.author_id) : undefined);
   const hours = selected ? suspensionHours[selected.target_id] ?? 24 : 24;
   return <section className="report-desk">
     <div className="report-queue"><div className="report-queue-head"><div><h2>举报收件箱</h2><p>先处理仍处于待处理状态的举报</p></div><select aria-label="举报筛选" value={filter} onChange={(event) => setFilter(event.target.value as 'open' | 'all')}><option value="open">待处理</option><option value="all">全部举报</option></select></div>
-      <div className="report-queue-list">{visible.length === 0 ? <div className="admin-empty"><Icon name="task_alt" /><b>没有待处理举报</b><small>新的举报会显示在这里。</small></div> : visible.map((report) => <button key={report.id} className={`report-queue-item ${selected?.id === report.id ? 'selected' : ''}`} onClick={() => onSelect(report.id)}><span className={`report-type-icon ${report.target_type}`}><Icon name={report.target_type === 'user' ? 'person' : report.target_type === 'post' ? 'article' : 'chat_bubble'} /></span><span className="report-queue-copy"><b>{targetLabel(report.target_type)} · {report.reason}</b><small>{profiles.find((item) => item.id === report.reporter_id)?.display_name ?? `举报人 ${shortId(report.reporter_id)}`}</small><small>{formatDate(report.created_at)}</small></span><span className={`status-pill ${report.status}`}>{report.status === 'open' ? '待处理' : report.status === 'handled' ? '已处理' : '已驳回'}</span></button>)}{hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : '加载更早举报'}</button>}</div>
+      <div className="report-queue-list">{visible.length === 0 ? <div className="admin-empty"><Icon name="task_alt" /><b>没有待处理举报</b><small>新的举报会显示在这里。</small></div> : visible.map((report) => <button key={report.id} className={`report-queue-item ${selected?.id === report.id ? 'selected' : ''}`} onClick={() => onSelect(report.id)}><span className={`report-type-icon ${report.target_type}`}><Icon name={report.target_type === 'user' ? 'person' : report.target_type === 'post' ? 'article' : 'chat_bubble'} /></span><span className="report-queue-copy"><b>{targetLabel(report.target_type)} · {report.reason}</b><small>举报人 UID：{report.reporter_uid ?? '暂不可用'}</small><small>{formatDate(report.created_at)}</small></span><span className={`status-pill ${report.status}`}>{report.status === 'open' ? '待处理' : report.status === 'handled' ? '已处理' : '已驳回'}</span></button>)}{hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : '加载更早举报'}</button>}</div>
     </div>
     <div className="report-detail">{!selected ? <div className="admin-empty"><Icon name="touch_app" /><b>选择一条举报</b><small>在左侧队列中选择举报，查看举报对象和处理选项。</small></div> : <>
       <header className="report-detail-head"><div><p className="eyebrow">REPORT DETAIL</p><h2>{targetLabel(selected.target_type)}举报</h2></div><span className={`status-pill ${selected.status}`}>{selected.status === 'open' ? '待处理' : selected.status === 'handled' ? '已处理' : '已驳回'}</span></header>
-      <div className="report-meta-grid"><div><small>举报原因</small><b>{selected.reason}</b></div><div><small>提交时间</small><b>{formatDate(selected.created_at)}</b></div><div><small>举报人</small><code>{selected.reporter_id}</code></div><div><small>对象 ID</small><code>{selected.target_id}</code></div></div>
+      <div className="report-meta-grid"><div><small>举报原因</small><b>{selected.reason}</b></div><div><small>提交时间</small><b>{formatDate(selected.created_at)}</b></div><div><small>举报人 UID</small><code>{selected.reporter_uid ?? '暂不可用'}</code></div><div><small>{selected.target_type === 'user' ? '被举报用户 UID' : '内容作者 UID'}</small><code>{selected.target_type === 'user' ? target?.profile?.uid ?? '读取中' : target?.author?.uid ?? '读取中'}</code></div>{target?.content && <div><small>内容 ID</small><code>{target.content.id}</code></div>}</div>
       {selected.detail && <p className="report-extra">补充说明：{selected.detail}</p>}
-      <section className="reported-object"><h3>被举报对象</h3>{!target ? <div className="target-loading"><Icon name="progress_activity" className="spin" />正在读取对象…</div> : target.error ? <p className="form-error">{target.error}</p> : target.profile ? <div className="target-profile"><Avatar profile={target.profile} url={target.images[0]} /><div><b>{target.profile.display_name}</b><small>@{target.profile.username ?? '未设置用户名'} · {statusLabel(effectiveStatus(target.profile), target.profile.suspension_expires_at)}</small><p>{target.profile.bio || '这个用户还没有填写简介。'}</p></div></div> : target.content ? <><div className="target-author"><Avatar profile={author} /><span><b>{author?.display_name ?? `用户 ${shortId(target.content.author_id)}`}</b><small>{formatDate(target.content.created_at)} · {target.content.target_type === 'post' ? '动态' : '评论'}</small></span></div><p className="target-body">{target.content.body || '（纯图片内容）'}</p>{target.images.length > 0 && <div className="target-images">{target.images.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="举报对象图片" /></a>)}</div>}<small className="target-record-id">内容 ID：{target.content.id}{target.content.post_id ? ` · 所属动态：${target.content.post_id}` : ''}</small></> : <p className="muted">目标内容已被删除或找不到。</p>}</section>
-      {selected.status === 'open' && <div className="report-actions"><h3>处理举报</h3>{selected.target_type === 'user' ? <div className="admin-action-row"><select value={hours} onChange={(event) => setSuspensionHours({ ...suspensionHours, [selected.target_id]: Number(event.target.value) })} aria-label="暂停时长"><option value={24}>暂停 24 小时</option><option value={168}>暂停 7 天</option><option value={720}>暂停 30 天</option></select><button className="soft-button" onClick={() => void onPerform('suspend_user', 'user', selected.target_id, { reportId: selected.id, suspensionHours: hours })}>暂停账号</button><button className="danger-button" onClick={() => void onPerform('ban_user', 'user', selected.target_id, { reportId: selected.id })}>永久封禁</button></div> : <div className="admin-action-row"><button className="soft-button" onClick={() => void onPerform(`hide_${selected.target_type}`, selected.target_type, selected.target_id, { reportId: selected.id })}>隐藏内容</button><button className="danger-button" onClick={() => void onPerform(`remove_${selected.target_type}`, selected.target_type, selected.target_id, { reportId: selected.id })}>移除并删除图片</button></div>}<div className="admin-action-row secondary-actions"><button className="primary-button compact" onClick={() => void onPerform('handle_report', selected.target_type, selected.target_id, { reportId: selected.id })}>标记已处理</button><button className="soft-button" onClick={() => void onPerform('dismiss_report', selected.target_type, selected.target_id, { reportId: selected.id })}>驳回举报</button></div></div>}
+      <section className="reported-object"><h3>被举报对象</h3>{!target ? <div className="target-loading"><Icon name="progress_activity" className="spin" />正在读取对象…</div> : target.error ? <p className="form-error">{target.error}</p> : target.profile ? <div className="target-profile"><Avatar profile={target.profile} url={target.images[0]} /><div><b>{target.profile.display_name}</b><small>UID：{target.profile.uid} · @{target.profile.username ?? '未设置用户名'} · {statusLabel(effectiveStatus(target.profile), target.profile.suspension_expires_at)}</small><p>{target.profile.bio || '这个用户还没有填写简介。'}</p></div></div> : target.content ? <><div className="target-author"><Avatar profile={author} /><span><b>{author?.display_name ?? '举报对象用户'}</b><small>作者 UID：{author?.uid ?? '暂不可用'} · {formatDate(target.content.created_at)} · {target.content.target_type === 'post' ? '动态' : '评论'} · {contentStatus(target.content.moderation_status)}</small></span></div><p className="target-body">{target.content.body || '（纯图片内容）'}</p>{target.images.length > 0 && <div className="target-images">{target.images.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="举报对象图片" /></a>)}</div>}{target.parentPost && <div className="report-parent-context"><h4>所属动态内容</h4><small>{contentStatus(target.parentPost.moderation_status)} · {formatDate(target.parentPost.created_at)} · ID {target.parentPost.id}</small><p className="target-body">{target.parentPost.body || '（纯图片动态）'}</p>{target.parentImages?.length ? <div className="target-images">{target.parentImages.map((url, index) => <a href={url} target="_blank" rel="noreferrer" key={`${url}-${index}`}><img src={url} alt={`关联动态图片 ${index + 1}`} /></a>)}</div> : null}</div>}<small className="target-record-id">内容 ID：{target.content.id}{target.content.post_id ? ` · 所属动态：${target.content.post_id}` : ''}</small></> : <p className="muted">目标内容已被删除或找不到。</p>}</section>
+      {selected.status === 'open' && <div className="report-actions"><h3>处理举报</h3>{selected.target_type === 'user' ? <div className="admin-action-row"><select value={hours} onChange={(event) => setSuspensionHours({ ...suspensionHours, [selected.target_id]: Number(event.target.value) })} aria-label="暂停时长"><option value={24}>暂停 24 小时</option><option value={168}>暂停 7 天</option><option value={720}>暂停 30 天</option></select><button className="soft-button" onClick={() => void onPerform('suspend_user', 'user', selected.target_id, { reportId: selected.id, suspensionHours: hours })}>暂停账号</button><button className="danger-button" onClick={() => void onPerform('ban_user', 'user', selected.target_id, { reportId: selected.id })}>永久封禁</button></div> : <div className="admin-action-row"><button className="soft-button" onClick={() => setPendingAction({ action: `hide_${selected.target_type}`, targetType: selected.target_type as 'post' | 'comment', targetId: selected.target_id, reportId: selected.id })}>隐藏内容</button><button className="danger-button" onClick={() => setPendingAction({ action: `remove_${selected.target_type}`, targetType: selected.target_type as 'post' | 'comment', targetId: selected.target_id, reportId: selected.id })}>移除并删除图片</button></div>}<div className="admin-action-row secondary-actions"><button className="primary-button compact" onClick={() => void onPerform('handle_report', selected.target_type, selected.target_id, { reportId: selected.id })}>标记已处理</button><button className="soft-button" onClick={() => void onPerform('dismiss_report', selected.target_type, selected.target_id, { reportId: selected.id })}>驳回举报</button></div></div>}
     </>}</div>
+    {pendingAction && <ModerationConfirmDialog kind={pendingAction.action.startsWith('remove_') ? 'remove' : 'hide'} itemLabel={targetLabel(pendingAction.targetType)} onClose={() => setPendingAction(null)} onConfirm={async (reason) => { await onPerform(pendingAction.action, pendingAction.targetType, pendingAction.targetId, { reportId: pendingAction.reportId }, reason); setPendingAction(null); }} />}
   </section>;
 }
 
-function ContentDesk({ content, search, setSearch, onPerform, hasMore, loading, onLoadMore }: { content: ContentRow[]; search: string; setSearch: (value: string) => void; onPerform: (action: string, targetType: string, targetId: string) => Promise<void>; hasMore: boolean; loading: boolean; onLoadMore: () => void }) {
+function ContentDesk({ content, search, setSearch, onPerform, hasMore, loading, onLoadMore }: { content: ContentRow[]; search: string; setSearch: (value: string) => void; onPerform: PerformAdminAction; hasMore: boolean; loading: boolean; onLoadMore: () => void }) {
+  const [selected, setSelected] = useState<ContentRow | null>(null);
   const rows = content.filter((item) => `${item.body} ${item.author_id} ${item.id}`.toLowerCase().includes(search.toLowerCase()));
-  return <section className="admin-section-card"><AdminSearch value={search} onChange={setSearch} placeholder="搜索动态、评论文字、作者或内容 ID" /><div className="admin-data-list">{rows.map((item) => <article className="admin-data-row" key={`${item.target_type}-${item.id}`}><div className="content-target-preview"><span className="report-type-icon"><Icon name={item.target_type === 'post' ? 'article' : 'chat_bubble'} /></span><div><b>{item.target_type === 'post' ? '动态' : '评论'} · {contentStatus(item.moderation_status)}</b><p>{item.body || '（图片内容）'}</p><small>作者 {item.author_id} · {formatDate(item.created_at)} · ID {item.id}</small></div></div><div className="admin-actions">{item.moderation_status !== 'removed' && <button className="soft-button" onClick={() => void onPerform(item.moderation_status === 'visible' ? `hide_${item.target_type}` : `restore_${item.target_type}`, item.target_type, item.id)}>{item.moderation_status === 'visible' ? '隐藏' : '恢复'}</button>}<button className="danger-button" onClick={() => void onPerform(`remove_${item.target_type}`, item.target_type, item.id)}>移除</button></div></article>)}{rows.length === 0 && <div className="admin-empty"><Icon name="search_off" /><b>没有匹配内容</b></div>}</div>{hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : '加载更多内容'}</button>}</section>;
+  return <section className="admin-section-card">
+    <AdminSearch value={search} onChange={setSearch} placeholder="搜索动态、评论文字、作者或内容 ID" />
+    <div className="admin-data-list">{rows.map((item) => <article className="admin-data-row content-row-trigger" key={`${item.target_type}-${item.id}`} role="button" tabIndex={0} aria-label={`查看${item.target_type === 'post' ? '动态' : '评论'}详情`} onClick={() => setSelected(item)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelected(item); } }}>
+      <div className="content-target-preview"><span className="report-type-icon"><Icon name={item.target_type === 'post' ? 'article' : 'chat_bubble'} /></span><div><b>{item.target_type === 'post' ? '动态' : '评论'} · {contentStatus(item.moderation_status)}</b><p>{item.body || '（图片内容）'}</p><small>{formatDate(item.created_at)} · 内容 ID {item.id}</small></div></div><Icon name="chevron_right" />
+    </article>)}{rows.length === 0 && <div className="admin-empty"><Icon name="search_off" /><b>没有匹配内容</b></div>}</div>
+    {hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : '加载更多内容'}</button>}
+    {selected && <ContentDetailDialog item={selected} onClose={() => setSelected(null)} onPerform={onPerform} />}
+  </section>;
+}
+
+function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; onClose: () => void; onPerform: PerformAdminAction }) {
+  const [detailItem, setDetailItem] = useState(item);
+  const [author, setAuthor] = useState<AdminProfile | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const [parentPost, setParentPost] = useState<ContentRow | null>(null);
+  const [parentImages, setParentImages] = useState<string[]>([]);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const [recordAvailable, setRecordAvailable] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [pendingKind, setPendingKind] = useState<'hide' | 'remove' | 'restore' | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      setDetailLoading(true); setDetailError('');
+      try {
+        if (!supabase) throw new Error('社区服务暂不可用。');
+        const table = item.target_type === 'post' ? 'posts' : 'comments';
+        const select = item.target_type === 'post'
+          ? 'id,author_id,body,image_paths,moderation_status,created_at,updated_at'
+          : 'id,post_id,author_id,body,image_paths,moderation_status,created_at';
+        const { data: latestData, error: latestError } = await supabase.from(table).select(select).eq('id', item.id).maybeSingle();
+        if (latestError) throw latestError;
+        if (!latestData) {
+          if (active) {
+            setRecordAvailable(false);
+            setDetailItem({ ...item, moderation_status: 'removed' });
+            setDetailError('这条内容已不存在，无法继续操作。');
+          }
+          return;
+        }
+        const latestItem = {
+          ...(latestData as unknown as ContentRow),
+          target_type: item.target_type,
+          image_paths: (latestData as unknown as { image_paths?: string[] }).image_paths ?? []
+        };
+        if (active) { setDetailItem(latestItem); setRecordAvailable(true); }
+
+        const { data: authorData, error: authorError } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at,created_at').eq('id', latestItem.author_id).maybeSingle();
+        if (authorError) throw authorError;
+        let nextAuthor = authorData as AdminProfile | null;
+        if (nextAuthor?.avatar_path && nextAuthor.account_status !== 'deleted') {
+          const { data: signedAvatar } = await supabase.storage.from('community-media').createSignedUrl(nextAuthor.avatar_path, 1800);
+          nextAuthor = { ...nextAuthor, avatar_url: signedAvatar?.signedUrl };
+        }
+
+        let nextImages: string[] = [];
+        if (latestItem.image_paths.length) {
+          const { data: signed, error: imageError } = await supabase.storage.from('community-media').createSignedUrls(latestItem.image_paths, 1800);
+          if (imageError) setDetailError(`部分图片暂时无法读取：${imageError.message}`);
+          else nextImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
+        }
+
+        let nextParentPost: ContentRow | null = null;
+        let nextParentImages: string[] = [];
+        if (latestItem.target_type === 'comment' && latestItem.post_id) {
+          const { data: parent, error: parentError } = await supabase.from('posts').select('id,author_id,body,image_paths,moderation_status,created_at,updated_at').eq('id', latestItem.post_id).maybeSingle();
+          if (parentError) throw parentError;
+          if (parent) {
+            nextParentPost = { ...parent, target_type: 'post' } as ContentRow;
+            if (nextParentPost.image_paths.length) {
+              const { data: signed, error: parentImageError } = await supabase.storage.from('community-media').createSignedUrls(nextParentPost.image_paths, 1800);
+              if (parentImageError) setDetailError(`关联动态图片暂时无法读取：${parentImageError.message}`);
+              else nextParentImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
+            }
+          }
+        }
+
+        if (active) { setAuthor(nextAuthor); setImages(nextImages); setParentPost(nextParentPost); setParentImages(nextParentImages); }
+      } catch (cause) {
+        if (active) { setRecordAvailable(false); setDetailError(cause instanceof Error ? cause.message : '内容详情暂时无法读取。'); }
+      } finally {
+        if (active) setDetailLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [item.id, item.target_type, item.author_id, item.post_id]);
+
+  const contentLabel = detailItem.target_type === 'post' ? '这条动态' : '这条评论';
+  const action = pendingKind === 'hide' ? `hide_${detailItem.target_type}` : pendingKind === 'restore' ? `restore_${detailItem.target_type}` : `remove_${detailItem.target_type}`;
+  return <div className="admin-modal-backdrop" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="admin-modal content-detail-modal" role="dialog" aria-modal="true" aria-labelledby="content-detail-title">
+      <header><div><p className="eyebrow">CONTENT REVIEW</p><h2 id="content-detail-title">{detailItem.target_type === 'post' ? '动态详情' : '评论详情'}</h2></div><button type="button" className="icon-button" aria-label="关闭内容详情" onClick={onClose}><Icon name="close" /></button></header>
+      <div className="content-detail-meta">
+        <span className={`status-pill ${detailItem.moderation_status}`}>{contentStatus(detailItem.moderation_status)}</span>
+        <span>发布时间：{formatDate(detailItem.created_at)}</span>
+        {detailItem.updated_at ? <span>最近更新：{formatDate(detailItem.updated_at)}</span> : null}
+        <span>内容 ID：<code>{detailItem.id}</code></span>
+        {detailItem.post_id ? <span>所属动态 ID：<code>{detailItem.post_id}</code></span> : null}
+      </div>
+      <div className="content-detail-author"><Avatar profile={author ?? undefined} /><div><b>{author?.display_name ?? '内容作者'}</b><small>作者 UID：{author?.uid ?? '读取中'}</small></div></div>
+      <section className="content-detail-section"><h3>发布内容</h3><p className="content-detail-body">{detailItem.body || '（纯图片内容）'}</p>{images.length > 0 && <div className="content-detail-images">{images.map((url, index) => <a href={url} target="_blank" rel="noreferrer" key={`${url}-${index}`}><img src={url} alt={`内容图片 ${index + 1}`} /></a>)}</div>}</section>
+      {parentPost && <section className="content-detail-section parent-post-preview"><h3>所属动态内容</h3><small>{contentStatus(parentPost.moderation_status)} · {formatDate(parentPost.created_at)} · ID {parentPost.id}</small><p className="content-detail-body">{parentPost.body || '（纯图片动态）'}</p>{parentImages.length > 0 && <div className="content-detail-images">{parentImages.map((url, index) => <a href={url} target="_blank" rel="noreferrer" key={`${url}-${index}`}><img src={url} alt={`关联动态图片 ${index + 1}`} /></a>)}</div>}</section>}
+      {detailLoading && <p className="muted">正在读取最新内容、作者和图片信息…</p>}{detailError && <p className="form-error" role="alert">{detailError}</p>}
+      <footer className="content-detail-actions">{detailItem.moderation_status !== 'removed' ? <>{detailItem.moderation_status === 'visible' ? <button type="button" className="soft-button" disabled={!recordAvailable || detailLoading} onClick={() => setPendingKind('hide')}>隐藏内容</button> : <button type="button" className="primary-button compact" disabled={!recordAvailable || detailLoading} onClick={() => setPendingKind('restore')}>恢复内容</button>}<button type="button" className="danger-button" disabled={!recordAvailable || detailLoading} onClick={() => setPendingKind('remove')}>删除内容</button></> : <span className="muted">此内容已删除</span>}</footer>
+    </section>
+    {pendingKind && <ModerationConfirmDialog kind={pendingKind} itemLabel={contentLabel} onClose={() => setPendingKind(null)} onConfirm={async (reason) => { await onPerform(action, detailItem.target_type, detailItem.id, undefined, reason); setPendingKind(null); onClose(); }} />}
+  </div>;
+}
+
+function ModerationConfirmDialog({ kind, itemLabel, onClose, onConfirm }: { kind: 'hide' | 'remove' | 'restore'; itemLabel: string; onClose: () => void; onConfirm: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const copy = kind === 'hide'
+    ? { title: '确认隐藏内容？', description: '隐藏后，普通用户将无法在社区看到这条内容。', button: '确认隐藏', danger: false }
+    : kind === 'remove'
+      ? { title: '确认删除内容？', description: '系统会移除这条内容并清理相关图片；此操作无法通过后台恢复。', button: '确认删除', danger: true }
+      : { title: '确认恢复内容？', description: '恢复后，这条内容会重新对社区用户显示。', button: '确认恢复', danger: false };
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy || !reason.trim()) return;
+    setBusy(true);
+    try { await onConfirm(reason.trim()); }
+    finally { setBusy(false); }
+  };
+  return <div className="admin-modal-backdrop action-confirm-backdrop" onPointerDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="admin-modal content-action-confirm" role="dialog" aria-modal="true" aria-labelledby="content-action-confirm-title">
+      <header><div><p className="eyebrow">{itemLabel}</p><h2 id="content-action-confirm-title">{copy.title}</h2></div><button type="button" className="icon-button" aria-label="关闭确认弹窗" onClick={onClose}><Icon name="close" /></button></header>
+      <p className="admin-modal-note">{copy.description}</p>
+      <form onSubmit={(event) => void submit(event)}><label><span>操作原因（写入后台记录）</span><textarea maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} required /></label><footer><button type="button" className="soft-button" disabled={busy} onClick={onClose}>取消</button><button type="submit" className={copy.danger ? 'danger-button' : 'primary-button'} disabled={busy || !reason.trim()}>{busy ? '处理中…' : copy.button}</button></footer></form>
+    </section>
+  </div>;
 }
 
 function AccountDesk({ mode, profiles, search, setSearch, onSearch, statusFilter, sort, registrationWindow, onUserFiltersChange, suspensionHours, setSuspensionHours, onPerform, hasMore, loading, onLoadMore, onRefresh, onMessage }: {
@@ -512,7 +683,6 @@ function roleErrorMessage(error?: string) {
   };
   return messages[error ?? ''] ?? '管理员权限操作失败，请稍后重试。';
 }
-function shortId(value: string) { return value.slice(0, 8); }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date); }
 async function readFunctionFailure(error: unknown, data: unknown): Promise<{ error?: string; partial?: boolean } | null> {
   if (data && typeof data === 'object') return data as { error?: string; partial?: boolean };
