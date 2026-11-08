@@ -39,6 +39,10 @@ content_path = "./supabase/templates/confirmation.html"
 subject = "日常有序密码重置验证码"
 content_path = "./supabase/templates/recovery.html"
 
+[auth.email.template.magic_link]
+subject = "日常有序登录验证码"
+content_path = "./supabase/templates/magic_link.html"
+
 [auth.sms]
 enable_confirmations = true
 

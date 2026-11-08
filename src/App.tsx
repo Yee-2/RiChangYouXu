@@ -2,13 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type Reac
 import type { Session } from '@supabase/supabase-js';
 import * as db from './db';
 import type { BackupPreview } from './db';
-import Community, { AccountSettings, AuthPage, FollowingPage, MyPostsPage, type Profile as CommunityProfile } from './community';
+import Community, { AccountSettings, AuthPage, DeleteAccountPage, FollowingPage, LogoutAccountPage, MyPostsPage, PasswordChangePage, ProfileEditPage, type Profile as CommunityProfile } from './community';
 import { supabase } from './supabase';
 import { Icon } from './Icon';
 import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, Meter, MeterReading, NavKey, Pet, PetEvent, PetEventKind, StoreName, ThemeChoice } from './types';
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
-type ProfileView = 'home' | 'auth' | 'account' | 'following' | 'posts';
+type ProfileView = 'home' | 'auth' | 'account' | 'edit-profile' | 'change-password' | 'delete-account' | 'logout' | 'following' | 'posts';
 const AdminPortal = lazy(() => import('./AdminPortal'));
 const emptyData: DataState = { checklists: [], checklistItems: [], checkTemplates: [], checkRuns: [], meters: [], meterReadings: [], pets: [], petEvents: [], preferences: [] };
 const id = () => crypto.randomUUID();
@@ -384,11 +384,15 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
   }, [session?.user.id, onMessage]);
 
   useEffect(() => {
-    if ((view === 'auth' && session) || (['account', 'following', 'posts'].includes(view) && !session)) setView('home');
+    if (['account', 'edit-profile', 'following', 'posts', 'delete-account', 'logout'].includes(view) && !session) setView('home');
   }, [view, session, setView]);
 
-  if (view === 'auth') return <div className="profile-subpage"><AuthPage onBack={() => setView('home')} /></div>;
-  if (view === 'account' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('home')}><Icon name="arrow_back" />返回我的</button><PageTitle eyebrow="ACCOUNT SETTINGS" title="账号设置" /><AccountSettings session={session} onMessage={onMessage} onProfileChange={setAccountProfile} /></div>;
+  if (view === 'auth') return <div className="profile-subpage"><AuthPage onBack={() => setView('home')} onMessage={onMessage} onAuthenticated={() => setView('home')} /></div>;
+  if (view === 'account' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('home')}><Icon name="arrow_back" />返回我的</button><PageTitle eyebrow="ACCOUNT SETTINGS" title="账号设置" /><AccountSettings session={session} onMessage={onMessage} onProfileChange={setAccountProfile} onNavigate={setView} /></div>;
+  if (view === 'edit-profile' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="PROFILE" title="编辑个人资料" /><ProfileEditPage session={session} onMessage={onMessage} onProfileChange={setAccountProfile} onComplete={() => setView('account')} /></div>;
+  if (view === 'change-password' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="修改密码" /><PasswordChangePage session={session} onMessage={onMessage} onComplete={() => setView('auth')} /></div>;
+  if (view === 'delete-account' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="注销账号" /><DeleteAccountPage onMessage={onMessage} onComplete={() => setView('home')} /></div>;
+  if (view === 'logout' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="退出登录" /><LogoutAccountPage onMessage={onMessage} onComplete={() => setView('home')} /></div>;
   if (view === 'following' && session) return <FollowingPage session={session} onBack={() => setView('home')} onOpenProfile={onOpenCommunityProfile} onMessage={onMessage} />;
   if (view === 'posts' && session) return <MyPostsPage session={session} onBack={() => setView('home')} onMessage={onMessage} />;
 
