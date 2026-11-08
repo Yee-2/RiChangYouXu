@@ -2,7 +2,7 @@
 
 版本：0.1.0  
 后端：Supabase Auth、PostgREST、Storage、Edge Functions  
-迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`
+迁移：按文件名顺序执行 `supabase/migrations/202611080001_initial_community.sql`、`supabase/migrations/202611080002_profile_avatar_policy.sql`、`supabase/migrations/20261108054808_complete_moderation_profile_workflows.sql`、`supabase/migrations/20261108073134_account_identity_admin_management.sql`、`supabase/migrations/20261108090539_numeric_uid_profile_pages_admin_users.sql`、`supabase/migrations/20261108090640_admin_list_profiles_email_cast.sql`、`supabase/migrations/20261108091550_limit_profile_uid_to_six_digits.sql`、`supabase/migrations/20261108095834_separate_admin_accounts_and_filters.sql`、`supabase/migrations/20261108103440_align_admin_filters_and_audit.sql`、`supabase/migrations/20261108125637_add_report_review_reason.sql`
 
 ## 连接与鉴权
 
@@ -70,7 +70,9 @@ Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 S
 | `follows` | `POST /follows` | 当前用户关注其他用户；禁止关注自己 |
 | `follows` | `DELETE /follows?follower_id=eq.{uid}&followee_id=eq.{id}` | 取消自己的关注 |
 | `reports` | `POST /reports` | 登录用户举报动态、评论或账号，初始状态 `open` |
-| `reports` | `GET /reports?reporter_id=eq.{uid}&order=created_at.desc` | 用户读取自己的举报和处理状态；RLS 限制只能读本人记录 |
+| `reports` | `GET /reports?reporter_id=eq.{uid}&order=created_at.desc` | 用户读取自己的举报、处理状态和 `review_reason`；RLS 限制只能读本人记录 |
+
+举报表的 `review_reason` 为可空文本，最多 500 字。举报被驳回时，`admin-moderate` 将后台填写的原因写入该字段；举报被标记已处理时字段清空。历史驳回理由从 `moderation_audit` 中按举报 ID 回填。只有举报人本人和管理员可以通过 RLS 读取对应举报记录及理由。
 
 动态正文最多 5,000 字；评论最多 2,000 字；动态最多 9 张图，评论最多 4 张图；每张图片最大 5 MB，MIME 仅接受 JPEG、PNG、WebP、GIF。
 
@@ -105,6 +107,23 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 { "action": "reset_admin_password", "targetId": "auth-user-uuid", "newPassword": "至少 8 位", "reason": "凭据重置" }
 ```
 
+`verify` 的成功响应中，`actor` 包含管理员 `id`、公开 `uid`、`display_name`、完整 `email` 和 `avatar_path`：
+
+```json
+{
+  "ok": true,
+  "actor": {
+    "id": "auth-user-uuid",
+    "uid": "100003",
+    "display_name": "日常伙伴-100003",
+    "email": "admin@example.com",
+    "avatar_path": "auth-user-uuid/avatar.webp"
+  }
+}
+```
+
+后台前端使用 `avatar_path` 向私有 `community-media` bucket 请求短时签名 URL，在右上角显示头像；没有头像或签名失败时显示名称首字。
+
 `list_accounts`、`list_users` 与 `list_admins` 每页最多返回 100 条；普通用户支持按账号状态、近 7/30/90 天注册范围筛选并按注册时间新旧排序。筛选按暂停到期后的有效状态判断。账号对象仅通过受保护后台接口返回完整邮箱。`find_account` 只查找现有普通用户。`grant_admin` 只接受状态正常且邮箱已验证的现有普通账号，并将身份写入独立的 `admin_accounts` 表；后台登录页没有注册入口。`revoke_admin` 不能移除最后一位 active 管理员。`reset_admin_password` 仅可重置另一位管理员的密码，要求填写原因；服务端先持久化重置意图，再调用 Auth Admin API 并写入操作结果，密码不会写入审计。角色授权/撤销与审计写入在同一数据库事务内完成；原因必填且最多 500 字。成功变更返回 `{ "ok": true }`。
 
 错误包括：`401 unauthorized`、`403 forbidden`、`404 account_not_found`、`400 target_not_eligible`、`400 already_admin`、`400 last_active_admin`、`400 invalid_request`。角色字段不能通过 PostgREST 客户端直接修改。
@@ -126,9 +145,11 @@ Bucket：`community-media`（私有）。对象路径格式：`{auth.uid()}/{uui
 }
 ```
 
-支持动作：`hide_post`、`remove_post`、`restore_post`、`hide_comment`、`remove_comment`、`restore_comment`、`suspend_user`、`restore_user`、`ban_user`、`unban_user`、`handle_report`、`dismiss_report`。`suspend_user` 的 `suspensionHours` 必须为 `24`、`168` 或 `720`；数据库会以服务端时间判断暂停是否到期，Auth ban 同步设定期限。到期后现有会话的写操作自动恢复，管理员列表也显示恢复状态。`ban_user` 使用独立 `banned` 状态，只有 `unban_user` 能恢复。管理员账号不能被暂停或封禁。移除动态会隐藏其评论、清理动态与评论图片后标记移除；存储清理失败时内容保持隐藏并返回 `partial: true`。带 `reportId` 的成功处理会同步更新举报状态。
+支持动作：`hide_post`、`remove_post`、`restore_post`、`hide_comment`、`remove_comment`、`restore_comment`、`suspend_user`、`restore_user`、`ban_user`、`unban_user`、`handle_report`、`dismiss_report`。`suspend_user` 的 `suspensionHours` 必须为 `24`、`168` 或 `720`；数据库会以服务端时间判断暂停是否到期，Auth ban 同步设定期限。到期后现有会话的写操作自动恢复，管理员列表也显示恢复状态。`ban_user` 使用独立 `banned` 状态，只有 `unban_user` 能恢复。管理员账号不能被暂停或封禁。移除动态会隐藏其评论、清理动态与评论图片后标记移除；存储清理失败时内容保持隐藏并返回 `partial: true`。带 `reportId` 的成功处理会同步更新举报状态；`dismiss_report` 会将输入原因存入该举报的 `review_reason`，供举报人在“我的举报”中查看；其他处理动作将该字段清空。对已标记为 `removed` 的动态或评论再次隐藏、删除或恢复会返回 `409 content_already_removed`，已删除内容不可恢复。
 
-成功：`{ "ok": true }`。常见错误：`401 unauthorized`、`403 forbidden`、`400 unsupported_action`、`400 invalid_request`。
+后台举报详情显示举报人 UID；用户类举报显示被举报用户 UID，动态/评论举报显示内容作者 UID 和内容 ID，并展示举报内容。后台内容管理中点击动态或评论可读取详情。动态详情包含文字、图片、作者 UID、状态与时间；评论详情还包含所属动态文字与图片。隐藏、删除及恢复操作均要求填写原因并通过确认弹窗；详情、记录状态或图片签名信息不完整时操作按钮禁用。
+
+成功：`{ "ok": true }`。常见错误：`401 unauthorized`、`403 forbidden`、`400 unsupported_action`、`400 invalid_request`、`404 target_not_found`、`409 content_already_removed`。
 
 ### `POST /functions/v1/delete-content`
 
