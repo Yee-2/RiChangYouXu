@@ -56,18 +56,21 @@ Deno.serve(async (request) => {
   const action = input.action;
   if (action === 'verify') return response({ ok: true, actor: { id: actor.id, uid: actor.uid } }, 200, cors);
 
-  if (action === 'list_accounts') {
+  if (action === 'list_accounts' || action === 'list_admins' || action === 'list_users') {
     const limit = Number.isInteger(input.limit) ? Math.min(Math.max(Number(input.limit), 1), 100) : 100;
     const offset = Number.isInteger(input.offset) ? Math.max(Number(input.offset), 0) : 0;
     const query = typeof input.query === 'string' ? input.query.trim().slice(0, 160) : null;
-    const { data, error } = await serviceClient.rpc('admin_list_accounts', {
+    const role = action === 'list_users' ? 'user' : 'admin';
+    const { data, error } = await serviceClient.rpc('admin_list_profiles', {
       p_actor_id: actor.id,
+      p_role: role,
       p_query: query || null,
       p_limit: limit,
       p_offset: offset
     });
     if (error) return response({ error: mapDatabaseError(error.message) }, 400, cors);
-    return response({ ok: true, accounts: data ?? [] }, 200, cors);
+    const collection = action === 'list_users' ? 'users' : action === 'list_accounts' ? 'accounts' : 'admins';
+    return response({ ok: true, [collection]: data ?? [] }, 200, cors);
   }
 
   if (action === 'find_account') {
@@ -111,6 +114,7 @@ function mapDatabaseError(message: string) {
     target_not_found: 'account_not_found',
     invalid_reason: 'invalid_reason',
     lookup_required: 'lookup_required',
+    invalid_role_filter: 'invalid_request',
     unsupported_action: 'unsupported_action'
   };
   const key = Object.keys(known).find((candidate) => message.includes(candidate));

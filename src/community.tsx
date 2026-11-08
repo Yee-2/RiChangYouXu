@@ -9,11 +9,12 @@ type Post = { id: string; author_id: string; body: string; image_paths: string[]
 type CommentItem = { id: string; post_id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; images?: string[] };
 type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: string; created_at: string };
 
-export default function Community({ session, onOpenMy }: { session: Session | null; onOpenMy?: () => void }) {
+export default function Community({ session, onOpenMy, initialProfileId, onExitUserProfile }: { session: Session | null; onOpenMy?: () => void; initialProfileId?: string | null; onExitUserProfile?: () => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(initialProfileId ?? null);
+  const [returnToPersonalPage, setReturnToPersonalPage] = useState(Boolean(initialProfileId));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showAuthPage, setShowAuthPage] = useState(false);
@@ -36,7 +37,12 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
     setLoading(true); setError('');
     try {
       let query = supabase.from('posts').select('id,author_id,body,image_paths,created_at,moderation_status').order('created_at', { ascending: false }).limit(40);
-      if (selectedUserId) query = query.eq('author_id', selectedUserId).eq('moderation_status', 'visible');
+      if (selectedUserId) {
+        query = query.eq('author_id', selectedUserId);
+        query = selectedUserId === session?.user.id
+          ? query.in('moderation_status', ['visible', 'hidden'])
+          : query.eq('moderation_status', 'visible');
+      }
       else if (session?.user.id) query = query.or(`moderation_status.eq.visible,and(author_id.eq.${session.user.id},moderation_status.eq.hidden)`);
       else query = query.eq('moderation_status', 'visible');
       if (selectedTopic) {
@@ -90,6 +96,11 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
   useEffect(() => { void loadProfile(); }, [loadProfile]);
   useEffect(() => { void loadPosts(); }, [loadPosts]);
   useEffect(() => {
+    if (!initialProfileId) return;
+    setSelectedUserId(initialProfileId);
+    setReturnToPersonalPage(true);
+  }, [initialProfileId]);
+  useEffect(() => {
     const timer = window.setInterval(() => refreshStatusClock(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -99,8 +110,12 @@ export default function Community({ session, onOpenMy }: { session: Session | nu
   if (!session && showAuthPage) return <AuthPage onBack={() => setShowAuthPage(false)} />;
   if (!session) return <CommunityWelcome onLogin={() => setShowAuthPage(true)} />;
 
-  const openUserProfile = (userId: string) => { setSelectedUserId(userId); setSelectedTopic(null); };
-  if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={() => setSelectedUserId(null)}><Icon name="arrow_back" />返回社区</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{error}</div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? posts.map((post) => <PostCard key={post.id} post={post} session={session} profile={profile} onRefresh={loadPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />) : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
+  const openUserProfile = (userId: string) => { setSelectedUserId(userId); setSelectedTopic(null); setReturnToPersonalPage(false); };
+  const closeUserProfile = () => {
+    if (returnToPersonalPage && onExitUserProfile) onExitUserProfile();
+    else setSelectedUserId(null);
+  };
+  if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={closeUserProfile}><Icon name="arrow_back" />{returnToPersonalPage ? '返回我的' : '返回社区'}</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{error}</div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? posts.map((post) => <PostCard key={post.id} post={post} session={session} profile={profile} onRefresh={loadPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />) : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
   return <div className="community-page">
     <div className="community-title"><div><p className="eyebrow">SHARE A LITTLE JOY</p><h1>生活社区</h1><p>记录生活的小事，也看看别人的可爱日常。</p></div>{profile?.role === 'admin' && profile.account_status === 'active' && <a className="soft-button admin-entry" href={import.meta.env.DEV ? `${window.location.origin}/#/admin` : 'https://admin.yeecc.cn/'}><Icon name="admin_panel_settings" />管理后台</a>}</div>
     {session && profile && effectiveProfileStatus(profile) !== 'active' && <div className="community-alert">账号当前状态：{profile.account_status === 'suspended' ? `暂停中${profile.suspension_expires_at ? `，预计 ${new Date(profile.suspension_expires_at).toLocaleString('zh-CN')} 恢复` : ''}` : profile.account_status === 'banned' ? '永久封禁，社区发布和互动已关闭。' : '已注销'}。{profile.account_status !== 'deleted' && '如需了解处理原因，请联系管理员。'}</div>}
@@ -188,7 +203,135 @@ function PublicProfileHeader({ userId, session, ownId, onError, onOpenMy }: { us
   };
   if (loading) return <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在加载用户主页…</div>;
   if (!profile) return <div className="feed-empty"><Icon name="person_off" /><h3>找不到这个用户</h3><p>账号可能已注销或资料暂不可用。</p></div>;
-  return <section className="public-profile-card"><div className="public-profile-avatar">{profile.avatar_url ? <img src={profile.avatar_url} alt={`${profile.display_name}的头像`} /> : <Icon name="person" size={38} />}</div><div className="public-profile-info"><p className="eyebrow">COMMUNITY MEMBER</p><h1>{profile.display_name}</h1><small>@{profile.username ?? '未设置用户名'}</small><p>{profile.bio || '这个用户还没有填写简介。'}</p><div className="public-profile-stats"><span><b>{followers}</b> 关注者</span><span><b>{following}</b> 正在关注</span></div></div><div className="public-profile-actions">{ownProfile ? <button className="soft-button" onClick={onOpenMy}><Icon name="edit" />我的账号设置</button> : <>{session && <button className="primary-button compact" onClick={() => void toggleFollow()}><Icon name={isFollowing ? 'person_check' : 'person_add'} />{isFollowing ? '已关注' : '关注'}</button>}{session && <button className="soft-button" onClick={() => void report()}><Icon name="flag" />举报账号</button>}</>}</div></section>;
+  return <section className="public-profile-card"><div className="public-profile-avatar">{profile.avatar_url ? <img src={profile.avatar_url} alt={`${profile.display_name}的头像`} /> : <Icon name="person" size={38} />}</div><div className="public-profile-info"><p className="eyebrow">COMMUNITY MEMBER</p><h1>{profile.display_name}</h1><small>UID：{profile.uid} · @{profile.username ?? '未设置用户名'}</small><p>{profile.bio || '这个用户还没有填写简介。'}</p><div className="public-profile-stats"><span><b>{followers}</b> 关注者</span><span><b>{following}</b> 正在关注</span></div></div><div className="public-profile-actions">{ownProfile ? <button className="soft-button" onClick={onOpenMy}><Icon name="edit" />我的账号设置</button> : <>{session && <button className="primary-button compact" onClick={() => void toggleFollow()}><Icon name={isFollowing ? 'person_check' : 'person_add'} />{isFollowing ? '已关注' : '关注'}</button>}{session && <button className="soft-button" onClick={() => void report()}><Icon name="flag" />举报账号</button>}</>}</div></section>;
+}
+
+export function FollowingPage({ session, onBack, onOpenProfile, onMessage }: { session: Session; onBack: () => void; onOpenProfile: (userId: string) => void; onMessage: (message: string) => void }) {
+  const [people, setPeople] = useState<Profile[]>([]);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState('');
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const suppressClickUntil = useRef(0);
+
+  const load = useCallback(async (append = false, offset = 0) => {
+    if (!supabase) return;
+    append ? setLoadingMore(true) : setLoading(true); setError('');
+    const { data: relations, error: followError, count } = await supabase.from('follows').select('followee_id,created_at', { count: 'exact' }).eq('follower_id', session.user.id).order('created_at', { ascending: false }).order('followee_id', { ascending: false }).range(offset, offset + 99);
+    if (followError) { setError(followError.message); setLoading(false); setLoadingMore(false); return; }
+    const ids = (relations ?? []).map((item) => item.followee_id as string);
+    setFollowingCount(count ?? 0); setHasMore(ids.length === 100); setNextOffset(offset + ids.length);
+    if (!ids.length) { if (!append) setPeople([]); setLoading(false); setLoadingMore(false); return; }
+    const { data: rows, error: profileError } = await supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', ids).neq('account_status', 'deleted');
+    if (profileError) { setError(profileError.message); setLoading(false); setLoadingMore(false); return; }
+    const profiles = (rows ?? []) as Profile[];
+    const paths = [...new Set(profiles.map((item) => item.avatar_path).filter((path): path is string => Boolean(path)))];
+    const signedByPath = new Map<string, string>();
+    if (paths.length) {
+      const { data: signed, error: imageError } = await supabase.storage.from('community-media').createSignedUrls(paths, 3600);
+      if (imageError) { setError(imageError.message); setLoading(false); setLoadingMore(false); return; }
+      paths.forEach((path, index) => { const url = signed?.[index]?.signedUrl; if (url) signedByPath.set(path, url); });
+    }
+    const byId = new Map(profiles.map((item) => [item.id, item]));
+    const mapped = ids.map((id) => byId.get(id)).filter((item): item is Profile => Boolean(item)).map((item) => ({ ...item, avatar_url: item.avatar_path ? signedByPath.get(item.avatar_path) : undefined }));
+    setPeople((current) => append ? [...current, ...mapped] : mapped);
+    setLoading(false); setLoadingMore(false);
+  }, [session.user.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const unfollow = async (person: Profile) => {
+    if (!supabase || busyId) return;
+    setBusyId(person.id);
+    const { error: deleteError } = await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('followee_id', person.id);
+    if (deleteError) { setError(deleteError.message); setBusyId(null); return; }
+    setPeople((current) => current.filter((item) => item.id !== person.id)); setFollowingCount((count) => Math.max(0, count - 1)); setNextOffset((offset) => Math.max(0, offset - 1));
+    setRevealedId(null); setBusyId(null); onMessage(`已取消关注 ${person.display_name}。`);
+  };
+
+  return <section className="profile-subpage following-page">
+    <button className="soft-button profile-back" type="button" onClick={onBack}><Icon name="arrow_back" />返回我的</button>
+    <div className="page-title-row"><div><p className="eyebrow">PEOPLE YOU FOLLOW</p><h1>我的关注</h1></div><span className="profile-count-chip">{followingCount} 位</span></div>
+    {error && <div className="community-alert" role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></div>}
+    {loading ? <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在读取关注列表…</div> : people.length ? <><div className="following-list">{people.map((person) => <div key={person.id} className={`following-row ${revealedId === person.id ? 'revealed' : ''}`} onTouchStart={(event) => { touchStartX.current = event.changedTouches[0]?.clientX ?? null; }} onTouchEnd={(event) => { const start = touchStartX.current; const end = event.changedTouches[0]?.clientX; touchStartX.current = null; if (start === null || end === undefined) return; const delta = end - start; if (delta > 42) { setRevealedId(person.id); suppressClickUntil.current = Date.now() + 450; } else if (delta < -42) setRevealedId(null); }}>
+      <button type="button" className="following-person" onClick={() => { if (Date.now() < suppressClickUntil.current) return; onOpenProfile(person.id); }}><span className="following-avatar">{person.avatar_url ? <img src={person.avatar_url} alt="" /> : <Icon name="person" />}</span><span className="following-copy"><b>{person.display_name}</b><small>UID：{person.uid}</small></span><Icon name="chevron_right" className="following-chevron" /></button>
+      <button type="button" className="following-more" aria-label={`显示 ${person.display_name} 的关注操作`} aria-expanded={revealedId === person.id} onClick={() => setRevealedId((current) => current === person.id ? null : person.id)}><Icon name="more_horiz" /></button>
+      {revealedId === person.id && <button type="button" className="following-unfollow" disabled={busyId === person.id} onClick={() => void unfollow(person)}>{busyId === person.id ? '处理中…' : '取消关注'}</button>}
+    </div>)}</div>{hasMore && <button className="load-more-button" disabled={loadingMore} onClick={() => void load(true, nextOffset)}>{loadingMore ? '加载中…' : '加载更多关注'}</button>}</> : <div className="feed-empty"><Icon name="person_add" /><h3>还没有关注的人</h3><p>去社区看看，遇见喜欢的生活分享。</p></div>}
+  </section>;
+}
+
+type OwnedPost = { id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' };
+type OwnedPostView = OwnedPost & { images: string[] };
+
+export function MyPostsPage({ session, onBack, onMessage }: { session: Session; onBack: () => void; onMessage: (message: string) => void }) {
+  const [posts, setPosts] = useState<OwnedPostView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState<OwnedPostView | null>(null);
+  const [editBody, setEditBody] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async (append = false) => {
+    if (!supabase) return;
+    const offset = append ? posts.length : 0;
+    append ? setLoadingMore(true) : setLoading(true);
+    setError('');
+    const { data, error: queryError } = await supabase.from('posts').select('id,body,image_paths,created_at,moderation_status').eq('author_id', session.user.id).in('moderation_status', ['visible', 'hidden']).order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + 39);
+    if (queryError) { setError(queryError.message); setLoading(false); setLoadingMore(false); return; }
+    const rows = (data ?? []) as OwnedPost[];
+    const paths = [...new Set(rows.flatMap((item) => item.image_paths))];
+    const signedByPath = new Map<string, string>();
+    if (paths.length) {
+      const { data: signed, error: imageError } = await supabase.storage.from('community-media').createSignedUrls(paths, 3600);
+      if (imageError) { setError(imageError.message); setLoading(false); setLoadingMore(false); return; }
+      paths.forEach((path, index) => { const url = signed?.[index]?.signedUrl; if (url) signedByPath.set(path, url); });
+    }
+    const mapped = rows.map((item) => ({ ...item, images: item.image_paths.map((path) => signedByPath.get(path) ?? '').filter(Boolean) }));
+    setPosts((current) => append ? [...current, ...mapped] : mapped);
+    setHasMore(rows.length === 40); setLoading(false); setLoadingMore(false);
+  }, [session.user.id, posts.length]);
+
+  useEffect(() => { void load(); }, [session.user.id]);
+
+  const savePost = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !editing || saving) return;
+    setSaving(true); setError('');
+    const { error: updateError } = await supabase.rpc('update_own_post', { p_post_id: editing.id, p_body: editBody });
+    if (updateError) { setError(updateError.message); setSaving(false); return; }
+    setEditing(null); setSaving(false); onMessage('动态已更新，图片已保留。'); await load();
+  };
+
+  const deletePost = async (post: OwnedPostView) => {
+    if (!supabase || !window.confirm('删除这条动态及其评论？相关图片也会一起删除。')) return;
+    const { data, error: invokeError } = await supabase.functions.invoke('delete-content', { body: { targetType: 'post', targetId: post.id } });
+    const failure = await readFunctionFailure(invokeError, data);
+    if (invokeError || failure?.error) { setError(failure?.error ?? invokeError?.message ?? '动态删除失败。'); if (failure?.partial) await load(); return; }
+    onMessage('动态已删除。'); await load();
+  };
+
+  return <section className="profile-subpage my-posts-page">
+    <button className="soft-button profile-back" type="button" onClick={onBack}><Icon name="arrow_back" />返回我的</button>
+    <div className="page-title-row"><div><p className="eyebrow">YOUR COMMUNITY POSTS</p><h1>我的动态</h1><p className="muted">查看、编辑或删除你发布过的动态。</p></div></div>
+    {error && <div className="community-alert" role="alert">{error}<button type="button" onClick={() => void load()}>重试</button></div>}
+    {loading ? <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在读取动态…</div> : posts.length ? <div className="my-post-list-cards">{posts.map((post) => <article className="my-post-card" key={post.id}>
+      <div className="my-post-meta"><span>{new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(post.created_at))}</span>{post.moderation_status === 'hidden' && <span className="status-pill suspended">审核处理中</span>}</div>
+      {post.body && <p className="post-body">{post.body}</p>}
+      {post.images.length > 0 && <div className={`post-images count-${Math.min(post.images.length, 4)}`}>{post.images.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="动态图片" loading="lazy" /></a>)}</div>}
+      {post.moderation_status === 'hidden' && <small className="my-post-hidden-note">该动态正处于审核或清理状态，暂不可编辑。</small>}
+      <div className="my-post-actions"><button type="button" className="soft-button" disabled={post.moderation_status !== 'visible'} onClick={() => { setEditing(post); setEditBody(post.body); }}><Icon name="edit" />编辑</button><button type="button" className="danger-button" onClick={() => void deletePost(post)}><Icon name="delete" />删除</button></div>
+    </article>)}</div> : <div className="feed-empty"><Icon name="article" /><h3>还没有发布过动态</h3><p>你在社区发布的内容会集中显示在这里。</p></div>}
+    {!loading && hasMore && <button className="load-more-button" disabled={loadingMore} onClick={() => void load(true)}>{loadingMore ? '加载中…' : '加载更多动态'}</button>}
+    {editing && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setEditing(null)}><section className="modal post-edit-modal" role="dialog" aria-modal="true" aria-label="编辑动态"><div className="modal-head"><h2>编辑动态</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setEditing(null)}><Icon name="close" /></button></div><form className="form-stack" onSubmit={(event) => void savePost(event)}><label className="field"><span>动态内容</span><textarea autoFocus rows={7} maxLength={5000} value={editBody} onChange={(event) => setEditBody(event.target.value)} placeholder="写下这条动态…" /></label><p className="muted">已发布的图片会保留；话题会按内容中的 #话题 自动同步。</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="my-post-actions"><button type="button" className="soft-button" onClick={() => setEditing(null)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : '保存修改'}</button></div></form></section></div>}
+  </section>;
 }
 
 function MyReports({ session }: { session: Session }) {

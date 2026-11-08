@@ -4,8 +4,8 @@ import type { Profile } from './community';
 import { Icon } from './Icon';
 import { supabase } from './supabase';
 
-type AdminSection = 'reports' | 'content' | 'accounts' | 'audit';
-type PageKey = 'reports' | 'profiles' | 'audit' | 'posts' | 'comments';
+type AdminSection = 'reports' | 'content' | 'users' | 'admins' | 'audit';
+type PageKey = 'reports' | 'profiles' | 'users' | 'admins' | 'audit' | 'posts' | 'comments';
 type AdminProfile = Profile & { email?: string; email_confirmed_at?: string | null; suspension_expires_at: string | null; created_at: string };
 type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: 'open' | 'handled' | 'dismissed'; created_at: string; reviewed_at?: string | null };
 type ContentRow = { id: string; target_type: 'post' | 'comment'; author_id: string; body: string; image_paths: string[]; moderation_status: 'visible' | 'hidden' | 'removed'; created_at: string; post_id?: string };
@@ -16,7 +16,8 @@ type AdminMetrics = { openReports: number; hiddenContent: number; restrictedAcco
 const sections: Array<{ id: AdminSection; label: string; icon: string }> = [
   { id: 'reports', label: '举报处理', icon: 'flag' },
   { id: 'content', label: '内容管理', icon: 'article' },
-  { id: 'accounts', label: '账号管理', icon: 'group' },
+  { id: 'users', label: '用户管理', icon: 'group' },
+  { id: 'admins', label: '管理员账号', icon: 'admin_panel_settings' },
   { id: 'audit', label: '操作记录', icon: 'history' }
 ];
 
@@ -25,13 +26,14 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
   const [access, setAccess] = useState<'loading' | 'allowed' | 'denied'>('loading');
   const [profiles, setProfiles] = useState<AdminProfile[]>([]);
   const [accounts, setAccounts] = useState<AdminProfile[]>([]);
+  const [users, setUsers] = useState<AdminProfile[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [content, setContent] = useState<ContentRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [target, setTarget] = useState<ReportTarget | null>(null);
-  const [offsets, setOffsets] = useState<Record<PageKey, number>>({ reports: 0, profiles: 0, audit: 0, posts: 0, comments: 0 });
-  const [hasMore, setHasMore] = useState<Record<PageKey, boolean>>({ reports: false, profiles: false, audit: false, posts: false, comments: false });
+  const [offsets, setOffsets] = useState<Record<PageKey, number>>({ reports: 0, profiles: 0, users: 0, admins: 0, audit: 0, posts: 0, comments: 0 });
+  const [hasMore, setHasMore] = useState<Record<PageKey, boolean>>({ reports: false, profiles: false, users: false, admins: false, audit: false, posts: false, comments: false });
   const [metrics, setMetrics] = useState<AdminMetrics>({ openReports: 0, hiddenContent: 0, restrictedAccounts: 0, handledToday: 0 });
   const [suspensionHours, setSuspensionHours] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
@@ -60,10 +62,11 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     setLoading(true); setError('');
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-    const [reportResult, profileResult, accountResult, auditResult, postResult, commentResult, openCountResult, hiddenPostsResult, hiddenCommentsResult, restrictedCountResult, handledTodayResult] = await Promise.all([
+    const [reportResult, profileResult, adminResult, userResult, auditResult, postResult, commentResult, openCountResult, hiddenPostsResult, hiddenCommentsResult, restrictedCountResult, handledTodayResult] = await Promise.all([
       supabase.from('reports').select('*').order('status', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100),
       supabase.from('profiles').select('id,uid,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(200),
-      supabase.functions.invoke('admin-manage', { body: { action: 'list_accounts', limit: 100, offset: 0 } }),
+      supabase.functions.invoke('admin-manage', { body: { action: 'list_admins', limit: 100, offset: 0 } }),
+      supabase.functions.invoke('admin-manage', { body: { action: 'list_users', limit: 100, offset: 0 } }),
       supabase.from('moderation_audit').select('id,actor_id,target_type,target_id,action,reason,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(200),
       supabase.from('posts').select('id,author_id,body,image_paths,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100),
       supabase.from('comments').select('id,post_id,author_id,body,image_paths,moderation_status,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).limit(150),
@@ -73,18 +76,23 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       supabase.from('profiles').select('id', { count: 'exact', head: true }).in('account_status', ['suspended', 'banned']),
       supabase.from('reports').select('id', { count: 'exact', head: true }).gte('reviewed_at', todayStart.toISOString()).lt('reviewed_at', tomorrowStart.toISOString())
     ]);
-    const firstError = reportResult.error ?? profileResult.error ?? accountResult.error ?? auditResult.error ?? postResult.error ?? commentResult.error ?? openCountResult.error ?? hiddenPostsResult.error ?? hiddenCommentsResult.error ?? restrictedCountResult.error ?? handledTodayResult.error;
-    if (firstError) setError(accountResult.error ? (await readFunctionFailure(accountResult.error, accountResult.data))?.error ?? accountResult.error.message : firstError.message);
+    const firstError = reportResult.error ?? profileResult.error ?? adminResult.error ?? userResult.error ?? auditResult.error ?? postResult.error ?? commentResult.error ?? openCountResult.error ?? hiddenPostsResult.error ?? hiddenCommentsResult.error ?? restrictedCountResult.error ?? handledTodayResult.error;
+    if (firstError) {
+      const failedList = adminResult.error ? adminResult : userResult.error ? userResult : null;
+      setError(failedList ? (await readFunctionFailure(failedList.error, failedList.data))?.error ?? failedList.error?.message ?? firstError.message : firstError.message);
+    }
     setMetrics({ openReports: openCountResult.count ?? 0, hiddenContent: (hiddenPostsResult.count ?? 0) + (hiddenCommentsResult.count ?? 0), restrictedAccounts: restrictedCountResult.count ?? 0, handledToday: handledTodayResult.count ?? 0 });
     const nextReports = (reportResult.data ?? []) as Report[];
     setReports(nextReports);
     const nextProfiles = (profileResult.data ?? []) as AdminProfile[];
-    const nextAccounts = ((accountResult.data as { accounts?: AdminProfile[] } | null)?.accounts ?? []);
+    const nextAccounts = ((adminResult.data as { admins?: AdminProfile[] } | null)?.admins ?? []);
+    const nextUsers = ((userResult.data as { users?: AdminProfile[] } | null)?.users ?? []);
     const nextAudit = (auditResult.data ?? []) as AuditRow[];
     const nextPosts = (postResult.data ?? []) as Array<Omit<ContentRow, 'target_type'>>;
     const nextComments = (commentResult.data ?? []) as Array<Omit<ContentRow, 'target_type'>>;
     setProfiles(nextProfiles);
     setAccounts(nextAccounts);
+    setUsers(nextUsers);
     setAudit(nextAudit);
     const rows: ContentRow[] = [
       ...nextPosts.map((item) => ({ ...item, target_type: 'post' as const })),
@@ -92,11 +100,33 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     ];
     rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
     setContent(rows);
-    setOffsets({ reports: nextReports.length, profiles: nextAccounts.length, audit: nextAudit.length, posts: nextPosts.length, comments: nextComments.length });
-    setHasMore({ reports: nextReports.length === 100, profiles: nextAccounts.length === 100, audit: nextAudit.length === 200, posts: nextPosts.length === 100, comments: nextComments.length === 150 });
+    setOffsets({ reports: nextReports.length, profiles: nextAccounts.length, users: nextUsers.length, admins: nextAccounts.length, audit: nextAudit.length, posts: nextPosts.length, comments: nextComments.length });
+    setHasMore({ reports: nextReports.length === 100, profiles: nextAccounts.length === 100, users: nextUsers.length === 100, admins: nextAccounts.length === 100, audit: nextAudit.length === 200, posts: nextPosts.length === 100, comments: nextComments.length === 150 });
     setSelectedReportId((current) => current && nextReports.some((item) => item.id === current) ? current : nextReports.find((item) => item.status === 'open')?.id ?? nextReports[0]?.id ?? null);
     setLoading(false);
   }, [access]);
+
+  const searchAccounts = async (role: 'user' | 'admin', query: string) => {
+    if (!supabase) return;
+    setLoading(true); setError('');
+    const action = role === 'user' ? 'list_users' : 'list_admins';
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-manage', { body: { action, query: query.trim(), limit: 100, offset: 0 } });
+    const failure = await readFunctionFailure(invokeError, data);
+    if (invokeError || failure?.error) {
+      setError(failure?.error ?? invokeError?.message ?? '账号搜索失败。');
+      setLoading(false);
+      return;
+    }
+    const rows = role === 'user'
+      ? ((data as { users?: AdminProfile[] } | null)?.users ?? [])
+      : ((data as { admins?: AdminProfile[] } | null)?.admins ?? []);
+    if (role === 'user') {
+      setUsers(rows); setOffsets((current) => ({ ...current, users: rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 }));
+    } else {
+      setAccounts(rows); setOffsets((current) => ({ ...current, admins: rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 }));
+    }
+    setLoading(false);
+  };
 
   const loadMore = async () => {
     if (!supabase || loading) return;
@@ -105,11 +135,17 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       const start = offsets.reports; const { data, error: queryError } = await supabase.from('reports').select('*').order('status', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false }).range(start, start + 99);
       if (queryError) setError(queryError.message);
       const rows = (data ?? []) as Report[]; setReports((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, reports: start + rows.length })); setHasMore((current) => ({ ...current, reports: rows.length === 100 }));
-    } else if (section === 'accounts') {
-      const start = offsets.profiles; const { data, error: queryError } = await supabase.functions.invoke('admin-manage', { body: { action: 'list_accounts', limit: 100, offset: start } });
+    } else if (section === 'users' || section === 'admins') {
+      const role = section === 'users' ? 'user' : 'admin';
+      const pageKey = role === 'user' ? 'users' : 'admins';
+      const start = offsets[pageKey]; const action = role === 'user' ? 'list_users' : 'list_admins';
+      const { data, error: queryError } = await supabase.functions.invoke('admin-manage', { body: { action, query: search.trim(), limit: 100, offset: start } });
       const failure = await readFunctionFailure(queryError, data);
       if (queryError || failure?.error) setError(failure?.error ?? queryError?.message ?? '账号读取失败。');
-      const rows = ((data as { accounts?: AdminProfile[] } | null)?.accounts ?? []); setAccounts((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, profiles: start + rows.length })); setHasMore((current) => ({ ...current, profiles: rows.length === 100 }));
+      const result = data as { users?: AdminProfile[]; admins?: AdminProfile[] } | null;
+      const rows = role === 'user' ? (result?.users ?? []) : (result?.admins ?? []);
+      if (role === 'user') { setUsers((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, users: start + rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 })); }
+      else { setAccounts((current) => [...current, ...rows]); setOffsets((current) => ({ ...current, admins: start + rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 })); }
     } else if (section === 'audit') {
       const start = offsets.audit; const { data, error: queryError } = await supabase.from('moderation_audit').select('id,actor_id,target_type,target_id,action,reason,created_at').order('created_at', { ascending: false }).order('id', { ascending: false }).range(start, start + 199);
       if (queryError) setError(queryError.message);
@@ -199,14 +235,14 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     <aside className="admin-sidebar">
       <button className="admin-brand" onClick={onExit}><span className="brandmark"><Icon name="auto_awesome" size={19} /></span><span>日常有序 <small>管理工作台</small></span></button>
       <p className="admin-nav-label">社区治理</p>
-      <nav aria-label="管理后台导航">{sections.map((item) => <button key={item.id} className={`admin-nav-item ${section === item.id ? 'active' : ''}`} onClick={() => { setSection(item.id); setSearch(''); }}><Icon name={item.icon} /><span>{item.label}</span>{item.id === 'reports' && openCount > 0 && <b className="admin-nav-count">{openCount}</b>}</button>)}</nav>
+      <nav aria-label="管理后台导航">{sections.map((item) => <button key={item.id} className={`admin-nav-item ${section === item.id ? 'active' : ''}`} onClick={() => { setSection(item.id); setSearch(''); if (item.id === 'users') void searchAccounts('user', ''); if (item.id === 'admins') void searchAccounts('admin', ''); }}><Icon name={item.icon} /><span>{item.label}</span>{item.id === 'reports' && openCount > 0 && <b className="admin-nav-count">{openCount}</b>}</button>)}</nav>
       <div className="admin-sidebar-bottom"><span className="admin-user-avatar">{(session.user.email ?? '管').slice(0, 1).toUpperCase()}</span><span><b>管理员</b><small>{session.user.email}</small></span><button className="icon-button small" aria-label="退出后台" onClick={onExit}><Icon name="logout" /></button></div>
     </aside>
     <main className="admin-main">
-      <header className="admin-topbar"><div><p className="eyebrow">COMMUNITY SAFETY</p><h1>{sections.find((item) => item.id === section)?.label}</h1></div><button className="soft-button" onClick={() => void load()} disabled={loading}><Icon name="refresh" />{loading ? '刷新中…' : '刷新数据'}</button></header>
+      <header className="admin-topbar"><div><p className="eyebrow">COMMUNITY SAFETY</p><h1>{sections.find((item) => item.id === section)?.label}</h1></div><button className="soft-button" onClick={() => section === 'users' ? void searchAccounts('user', search) : section === 'admins' ? void searchAccounts('admin', search) : void load()} disabled={loading}><Icon name="refresh" />{loading ? '刷新中…' : '刷新数据'}</button></header>
       <section className="admin-metrics" aria-label="社区管理概况"><article><span className="metric-icon coral"><Icon name="flag" /></span><div><small>待处理举报</small><b>{openCount}</b></div></article><article><span className="metric-icon blue"><Icon name="visibility_off" /></span><div><small>已隐藏内容</small><b>{hiddenCount}</b></div></article><article><span className="metric-icon amber"><Icon name="person_alert" /></span><div><small>受限账号</small><b>{accountCount}</b></div></article><article><span className="metric-icon green"><Icon name="verified_user" /></span><div><small>今日处理举报</small><b>{metrics.handledToday}</b></div></article></section>
       {error && <div className="community-alert" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="关闭提示"><Icon name="close" /></button></div>}
-      {loading && reports.length === 0 && profiles.length === 0 && accounts.length === 0 && content.length === 0 ? <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在加载管理数据…</div> : section === 'reports' ? <ReportDesk reports={reports} selected={selectedReport} target={target} profiles={profiles} suspensionHours={suspensionHours} setSuspensionHours={setSuspensionHours} onSelect={(id) => setSelectedReportId(id)} onPerform={perform} hasMore={hasMore.reports} loading={loading} onLoadMore={() => void loadMore()} /> : section === 'content' ? <ContentDesk content={content} search={search} setSearch={setSearch} onPerform={perform} hasMore={hasMore.posts || hasMore.comments} loading={loading} onLoadMore={() => void loadMore()} /> : section === 'accounts' ? <AccountDesk profiles={accounts} search={search} setSearch={setSearch} suspensionHours={suspensionHours} setSuspensionHours={setSuspensionHours} onPerform={perform} hasMore={hasMore.profiles} loading={loading} onLoadMore={() => void loadMore()} onRefresh={load} onMessage={setError} /> : <AuditDesk rows={audit} search={search} setSearch={setSearch} hasMore={hasMore.audit} loading={loading} onLoadMore={() => void loadMore()} />}
+      {loading && reports.length === 0 && profiles.length === 0 && accounts.length === 0 && users.length === 0 && content.length === 0 ? <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在加载管理数据…</div> : section === 'reports' ? <ReportDesk reports={reports} selected={selectedReport} target={target} profiles={profiles} suspensionHours={suspensionHours} setSuspensionHours={setSuspensionHours} onSelect={(id) => setSelectedReportId(id)} onPerform={perform} hasMore={hasMore.reports} loading={loading} onLoadMore={() => void loadMore()} /> : section === 'content' ? <ContentDesk content={content} search={search} setSearch={setSearch} onPerform={perform} hasMore={hasMore.posts || hasMore.comments} loading={loading} onLoadMore={() => void loadMore()} /> : section === 'users' ? <AccountDesk mode="users" profiles={users} search={search} setSearch={setSearch} onSearch={(query) => void searchAccounts('user', query)} suspensionHours={suspensionHours} setSuspensionHours={setSuspensionHours} onPerform={perform} hasMore={hasMore.users} loading={loading} onLoadMore={() => void loadMore()} onRefresh={() => searchAccounts('user', search)} onMessage={setError} /> : section === 'admins' ? <AccountDesk mode="admins" profiles={accounts} search={search} setSearch={setSearch} onSearch={(query) => void searchAccounts('admin', query)} suspensionHours={suspensionHours} setSuspensionHours={setSuspensionHours} onPerform={perform} hasMore={hasMore.admins} loading={loading} onLoadMore={() => void loadMore()} onRefresh={() => searchAccounts('admin', search)} onMessage={setError} /> : <AuditDesk rows={audit} search={search} setSearch={setSearch} hasMore={hasMore.audit} loading={loading} onLoadMore={() => void loadMore()} />}
       <footer className="admin-footer">管理操作会记录管理员、处理对象、动作、原因与时间。新增账号在邮箱验证后可直接使用。</footer>
     </main>
   </div>;
@@ -239,15 +275,14 @@ function ContentDesk({ content, search, setSearch, onPerform, hasMore, loading, 
   return <section className="admin-section-card"><AdminSearch value={search} onChange={setSearch} placeholder="搜索动态、评论文字、作者或内容 ID" /><div className="admin-data-list">{rows.map((item) => <article className="admin-data-row" key={`${item.target_type}-${item.id}`}><div className="content-target-preview"><span className="report-type-icon"><Icon name={item.target_type === 'post' ? 'article' : 'chat_bubble'} /></span><div><b>{item.target_type === 'post' ? '动态' : '评论'} · {contentStatus(item.moderation_status)}</b><p>{item.body || '（图片内容）'}</p><small>作者 {item.author_id} · {formatDate(item.created_at)} · ID {item.id}</small></div></div><div className="admin-actions">{item.moderation_status !== 'removed' && <button className="soft-button" onClick={() => void onPerform(item.moderation_status === 'visible' ? `hide_${item.target_type}` : `restore_${item.target_type}`, item.target_type, item.id)}>{item.moderation_status === 'visible' ? '隐藏' : '恢复'}</button>}<button className="danger-button" onClick={() => void onPerform(`remove_${item.target_type}`, item.target_type, item.id)}>移除</button></div></article>)}{rows.length === 0 && <div className="admin-empty"><Icon name="search_off" /><b>没有匹配内容</b></div>}</div>{hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : '加载更多内容'}</button>}</section>;
 }
 
-function AccountDesk({ profiles, search, setSearch, suspensionHours, setSuspensionHours, onPerform, hasMore, loading, onLoadMore, onRefresh, onMessage }: {
-  profiles: AdminProfile[]; search: string; setSearch: (value: string) => void; suspensionHours: Record<string, number>; setSuspensionHours: (value: Record<string, number>) => void;
+function AccountDesk({ mode, profiles, search, setSearch, onSearch, suspensionHours, setSuspensionHours, onPerform, hasMore, loading, onLoadMore, onRefresh, onMessage }: {
+  mode: 'users' | 'admins'; profiles: AdminProfile[]; search: string; setSearch: (value: string) => void; onSearch: (query: string) => void; suspensionHours: Record<string, number>; setSuspensionHours: (value: Record<string, number>) => void;
   onPerform: (action: string, targetType: string, targetId: string, options?: { suspensionHours?: number }) => Promise<void>;
   hasMore: boolean; loading: boolean; onLoadMore: () => void; onRefresh: () => Promise<void>; onMessage: (message: string) => void;
 }) {
   const [lookup, setLookup] = useState('');
   const [candidate, setCandidate] = useState<AdminProfile | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
-  const rows = profiles.filter((item) => `${item.display_name} ${item.username ?? ''} ${item.uid} ${item.email ?? ''} ${item.id}`.toLowerCase().includes(search.toLowerCase()));
 
   const findAccount = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -275,18 +310,23 @@ function AccountDesk({ profiles, search, setSearch, suspensionHours, setSuspensi
   };
 
   const candidateEligible = candidate?.role === 'user' && candidate.account_status === 'active' && Boolean(candidate.email_confirmed_at);
+  const searchPlaceholder = mode === 'users' ? '输入纯数字 UID 或邮箱搜索普通用户' : '输入纯数字 UID 或邮箱搜索管理员';
   return <section className="admin-section-card">
-    <div className="admin-role-manager">
+    {mode === 'admins' && <div className="admin-role-manager">
       <div><p className="eyebrow">ADMINISTRATORS</p><h2>添加管理员</h2><p>输入已注册账号的短 UID 或完整邮箱，只有邮箱验证通过且账号正常的用户可以获授权。</p></div>
-      <form className="admin-role-lookup" onSubmit={(event) => void findAccount(event)}><input value={lookup} onChange={(event) => setLookup(event.target.value)} placeholder="RY-… 或 name@example.com" aria-label="通过 UID 或邮箱查找账号" required /><button className="primary-button compact" disabled={lookupBusy}>{lookupBusy ? '查找中…' : '查找账号'}</button></form>
+      <form className="admin-role-lookup" onSubmit={(event) => void findAccount(event)}><input value={lookup} onChange={(event) => setLookup(event.target.value)} placeholder="纯数字 UID 或 name@example.com" aria-label="通过 UID 或邮箱查找账号" required /><button className="primary-button compact" disabled={lookupBusy}>{lookupBusy ? '查找中…' : '查找账号'}</button></form>
       {candidate && <article className="admin-role-candidate"><div><b>{candidate.display_name}</b><small>{candidate.email ?? '无邮箱'} · UID {candidate.uid}</small><small>{candidate.email_confirmed_at ? '邮箱已验证' : '邮箱尚未验证'} · {statusLabel(effectiveStatus(candidate), candidate.suspension_expires_at)}</small></div>{candidate.role === 'admin' ? <span className="status-pill active">已是管理员</span> : <button className="primary-button compact" disabled={!candidateEligible} onClick={() => void changeRole(candidate, 'grant_admin')}>设为管理员</button>}</article>}
-    </div>
-    <AdminSearch value={search} onChange={setSearch} placeholder="筛选已加载账号：昵称、UID、邮箱或账号 ID" />
-    <div className="admin-data-list">{rows.map((person) => {
+    </div>}
+    <form className="admin-role-lookup admin-list-search" onSubmit={(event) => { event.preventDefault(); onSearch(search); }}>
+      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={searchPlaceholder} aria-label={searchPlaceholder} />
+      <button className="primary-button compact" type="submit" disabled={loading}><Icon name="search" />搜索</button>
+      {search && <button className="soft-button compact" type="button" onClick={() => { setSearch(''); onSearch(''); }}>清除</button>}
+    </form>
+    <div className="admin-data-list">{profiles.map((person) => {
       const state = effectiveStatus(person); const hours = suspensionHours[person.id] ?? 24;
-      return <article className="admin-data-row" key={person.id}><div className="account-target"><Avatar profile={person} /><div><b>{person.display_name} {person.role === 'admin' ? '· 管理员' : ''}<span className={`status-pill ${state}`}>{statusLabel(state, person.suspension_expires_at)}</span></b><small>{person.email ?? '邮箱不可用'} · UID {person.uid} · 注册 {formatDate(person.created_at)}</small><p>{person.bio || '暂无个人简介'}</p></div></div>{person.role === 'admin' ? <div className="admin-actions account-actions"><button className="danger-button" onClick={() => void changeRole(person, 'revoke_admin')}>撤销管理员</button></div> : <div className="admin-actions account-actions">{state !== 'banned' && <><select value={hours} onChange={(event) => setSuspensionHours({ ...suspensionHours, [person.id]: Number(event.target.value) })} aria-label={`${person.display_name}的暂停时长`}><option value={24}>24 小时</option><option value={168}>7 天</option><option value={720}>30 天</option></select><button className="soft-button" onClick={() => void onPerform('suspend_user', 'user', person.id, { suspensionHours: hours })}>{state === 'suspended' ? '重新暂停' : '暂停'}</button></>}{state === 'banned' ? <button className="primary-button compact" onClick={() => void onPerform('unban_user', 'user', person.id)}>手动解封</button> : <button className="danger-button" onClick={() => void onPerform('ban_user', 'user', person.id)}>永久封禁</button>}{state === 'suspended' && <button className="primary-button compact" onClick={() => void onPerform('restore_user', 'user', person.id)}>恢复账号</button>}</div>}</article>;
-    })}{rows.length === 0 && <div className="admin-empty"><Icon name="search_off" /><b>没有匹配账号</b></div>}</div>
-    {hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : '加载更多账号'}</button>}
+      return <article className="admin-data-row" key={person.id}><div className="account-target"><Avatar profile={person} /><div><b>{person.display_name}{mode === 'admins' && ' · 管理员'}<span className={`status-pill ${state}`}>{statusLabel(state, person.suspension_expires_at)}</span></b><small>{person.email ?? '邮箱不可用'} · UID {person.uid} · 注册 {formatDate(person.created_at)}</small><p>{person.bio || '暂无个人简介'}</p></div></div>{mode === 'admins' ? <div className="admin-actions account-actions"><button className="danger-button" onClick={() => void changeRole(person, 'revoke_admin')}>撤销管理员</button></div> : <div className="admin-actions account-actions">{state !== 'banned' && <><select value={hours} onChange={(event) => setSuspensionHours({ ...suspensionHours, [person.id]: Number(event.target.value) })} aria-label={`${person.display_name}的暂停时长`}><option value={24}>24 小时</option><option value={168}>7 天</option><option value={720}>30 天</option></select><button className="soft-button" onClick={() => void onPerform('suspend_user', 'user', person.id, { suspensionHours: hours })}>{state === 'suspended' ? '重新暂停' : '暂停'}</button></>}{state === 'banned' ? <button className="primary-button compact" onClick={() => void onPerform('unban_user', 'user', person.id)}>手动解封</button> : <button className="danger-button" onClick={() => void onPerform('ban_user', 'user', person.id)}>永久封禁</button>}{state === 'suspended' && <button className="primary-button compact" onClick={() => void onPerform('restore_user', 'user', person.id)}>恢复账号</button>}</div>}</article>;
+    })}{profiles.length === 0 && <div className="admin-empty"><Icon name="search_off" /><b>{search ? '没有匹配账号' : mode === 'users' ? '还没有普通用户' : '还没有管理员'}</b></div>}</div>
+    {hasMore && <button className="load-more-button" disabled={loading} onClick={onLoadMore}>{loading ? '加载中…' : mode === 'users' ? '加载更多用户' : '加载更多管理员'}</button>}
   </section>;
 }
 
