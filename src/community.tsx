@@ -14,6 +14,8 @@ type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment'
 export default function Community({ session, onOpenMy, initialProfileId, onExitUserProfile }: { session: Session | null; onOpenMy?: () => void; initialProfileId?: string | null; onExitUserProfile?: () => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
+  const postsRequestId = useRef(0);
+  const profileRequestId = useRef(0);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(initialProfileId ?? null);
   const [returnToPersonalPage, setReturnToPersonalPage] = useState(Boolean(initialProfileId));
@@ -23,12 +25,15 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
   const [, refreshStatusClock] = useState(0);
 
   const loadProfile = useCallback(async () => {
+    const requestId = ++profileRequestId.current;
     if (!supabase || !session?.user) { setProfile(null); return; }
     const { data, error: profileError } = await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').eq('id', session.user.id).maybeSingle();
+    if (requestId !== profileRequestId.current) return;
     if (profileError) { setError(profileError.message); return; }
     const value = data as Profile | null;
     if (value?.avatar_path) {
       const { data: signed } = await supabase.storage.from('community-media').createSignedUrl(value.avatar_path, 3600);
+      if (requestId !== profileRequestId.current) return;
       value.avatar_url = signed?.signedUrl;
     }
     setProfile(value);
@@ -36,6 +41,7 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
+    const requestId = ++postsRequestId.current;
     setLoading(true); setError('');
     try {
       let query = supabase.from('posts').select('id,author_id,body,image_paths,created_at,moderation_status').order('created_at', { ascending: false }).limit(40);
@@ -51,7 +57,7 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
         const { data: links, error: linkError } = await supabase.from('post_topics').select('post_id').eq('topic_id', selectedTopic.id);
         if (linkError) throw linkError;
         const postIds = (links ?? []).map((link) => link.post_id as string);
-        if (postIds.length === 0) { setPosts([]); setLoading(false); return; }
+        if (postIds.length === 0) { if (requestId === postsRequestId.current) setPosts([]); return; }
         query = query.in('id', postIds);
       }
       const { data: rawPosts, error: postError } = await query;
@@ -73,6 +79,13 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
         if (topic) topicLinks.set(row.post_id, [...(topicLinks.get(row.post_id) ?? []), topic]);
       }
       const likes = likeResult.data ?? []; const comments = (commentResult.data ?? []) as CommentItem[]; const followed = new Set((followResult.data ?? []).map((item) => item.followee_id as string));
+      const likeCounts = new Map<string, number>();
+      const likedPostIds = new Set<string>();
+      for (const like of likes) {
+        const postId = like.post_id as string;
+        likeCounts.set(postId, (likeCounts.get(postId) ?? 0) + 1);
+        if (like.user_id === session?.user.id) likedPostIds.add(postId);
+      }
       const commentAuthors = [...new Set(comments.map((comment) => comment.author_id))];
       const commentProfiles = commentAuthors.length ? await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', commentAuthors) : { data: [], error: null };
       if (commentProfiles.error) throw commentProfiles.error;
@@ -83,16 +96,23 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
       const urls = new Map((signed.data ?? []).map((file) => [file.path ?? '', file.signedUrl ?? '']));
       for (const person of people.values()) if (person.avatar_path) person.avatar_url = urls.get(person.avatar_path);
       const decoratedComments = comments.map((comment) => ({ ...comment, profile: people.get(comment.author_id), images: comment.image_paths.map((path) => urls.get(path) ?? '').filter(Boolean) }));
+      const commentsByPost = new Map<string, typeof decoratedComments>();
+      for (const comment of decoratedComments) {
+        const postComments = commentsByPost.get(comment.post_id);
+        if (postComments) postComments.push(comment);
+        else commentsByPost.set(comment.post_id, [comment]);
+      }
+      if (requestId !== postsRequestId.current) return;
       setPosts(list.map((post) => ({
         ...post, profile: people.get(post.author_id), topics: topicLinks.get(post.id) ?? [],
-        liked: Boolean(session?.user && likes.some((like) => like.post_id === post.id && like.user_id === session.user.id)),
+        liked: likedPostIds.has(post.id),
         followed: followed.has(post.author_id),
-        likes: likes.filter((like) => like.post_id === post.id).length,
-        comments: decoratedComments.filter((comment) => comment.post_id === post.id),
+        likes: likeCounts.get(post.id) ?? 0,
+        comments: commentsByPost.get(post.id) ?? [],
         images: post.image_paths.map((path) => urls.get(path) ?? '').filter(Boolean)
       })));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '动态加载失败，请稍后重试。'); }
-    finally { setLoading(false); }
+    } catch (cause) { if (requestId === postsRequestId.current) setError(cause instanceof Error ? cause.message : '动态加载失败，请稍后重试。'); }
+    finally { if (requestId === postsRequestId.current) setLoading(false); }
   }, [selectedTopic?.id, selectedUserId, session?.user?.id]);
 
   useEffect(() => { void loadProfile(); }, [loadProfile]);
