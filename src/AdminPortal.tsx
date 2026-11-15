@@ -4,6 +4,7 @@ import { useOtpCooldown } from './community';
 import { Icon } from './Icon';
 import { communityConfigured, supabase } from './supabase';
 import { accountPasswordRule, isValidAccountPassword } from './authValidation';
+import { toChineseUserMessage } from './userMessages';
 
 type AuthMode = 'login' | 'forgot' | 'recover';
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -125,9 +126,9 @@ function AdminLogin({ mode, setMode, notice, setNotice }: { mode: AuthMode; setM
         <label><span>管理员邮箱</span><input name="email" type="email" autoComplete="username" placeholder="name@example.com" value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} readOnly={resetCodeSent} required /></label>
         {mode === 'login' && <label><span>密码</span><input name="password" type="password" autoComplete="current-password" placeholder="输入密码" required /></label>}
         {mode === 'forgot' && resetCodeSent && <><label><span>邮箱验证码</span><input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="输入 6 位数字验证码" required /></label><label><span>新密码</span><input type="password" minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label><span>确认新密码</span><input type="password" minLength={8} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label><button type="button" className="text-button" disabled={busy || resendSeconds > 0} onClick={() => void resendResetCode()}>{resendSeconds > 0 ? `${resendSeconds} 秒后可重发` : '重新发送验证码'}</button></>}
-        {notice && <p className="admin-auth-notice">{notice}</p>}
-        {error && <p className="form-error" role="alert">{error}</p>}
-        {message && <p className="form-success" role="status">{message}</p>}
+        {notice && <p className="admin-auth-notice">{toChineseUserMessage(notice)}</p>}
+        {error && <p className="form-error" role="alert">{toChineseUserMessage(error)}</p>}
+        {message && <p className="form-success" role="status">{toChineseUserMessage(message)}</p>}
         <button className="primary-button admin-login-submit" disabled={busy}>{busy ? '请稍候…' : mode === 'forgot' ? resetCodeSent ? '验证并更新密码' : '发送验证码' : '登录管理后台'}</button>
       </form>
       <div className="admin-login-links">
@@ -166,7 +167,7 @@ function AdminPasswordRecovery({ onBack, hasSession }: { onBack: () => void; has
     <form className="admin-login-form" onSubmit={submit}>
       <label><span>新密码</span><input type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
       <label><span>确认新密码</span><input type="password" autoComplete="new-password" minLength={8} value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>
-      {error && <p className="form-error" role="alert">{error}</p>}
+      {error && <p className="form-error" role="alert">{toChineseUserMessage(error)}</p>}
       <button className="primary-button admin-login-submit" disabled={busy}>{busy ? '保存中…' : '更新密码'}</button>
     </form>
     {!hasSession && <button className="text-button admin-recovery-back" onClick={onBack}>重新申请重置邮件</button>}
