@@ -2,14 +2,22 @@ import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type Reac
 import type { Session } from '@supabase/supabase-js';
 import * as db from './db';
 import type { BackupPreview } from './db';
-import Community, { AccountSettings, AuthPage, DeleteAccountPage, FollowingPage, LogoutAccountPage, MyPostsPage, PasswordChangePage, ProfileEditPage, type Profile as CommunityProfile } from './community';
-import { supabase } from './supabase';
+import type { Profile as CommunityProfile } from './community';
 import { Icon } from './Icon';
 import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, Meter, MeterReading, NavKey, Pet, PetEvent, PetEventKind, StoreName, ThemeChoice } from './types';
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
 type ProfileView = 'home' | 'auth' | 'account' | 'edit-profile' | 'change-password' | 'delete-account' | 'logout' | 'following' | 'posts';
 const AdminPortal = lazy(() => import('./AdminPortal'));
+const Community = lazy(() => import('./community'));
+const AccountSettings = lazy(async () => ({ default: (await import('./community')).AccountSettings }));
+const AuthPage = lazy(async () => ({ default: (await import('./community')).AuthPage }));
+const DeleteAccountPage = lazy(async () => ({ default: (await import('./community')).DeleteAccountPage }));
+const FollowingPage = lazy(async () => ({ default: (await import('./community')).FollowingPage }));
+const LogoutAccountPage = lazy(async () => ({ default: (await import('./community')).LogoutAccountPage }));
+const MyPostsPage = lazy(async () => ({ default: (await import('./community')).MyPostsPage }));
+const PasswordChangePage = lazy(async () => ({ default: (await import('./community')).PasswordChangePage }));
+const ProfileEditPage = lazy(async () => ({ default: (await import('./community')).ProfileEditPage }));
 const emptyData: DataState = { checklists: [], checklistItems: [], checkTemplates: [], checkRuns: [], meters: [], meterReadings: [], pets: [], petEvents: [], preferences: [] };
 const id = () => crypto.randomUUID();
 const today = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; };
@@ -66,10 +74,15 @@ function LifeApp() {
   };
 
   useEffect(() => {
-    if (!supabase) return;
-    void supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => subscription.unsubscribe();
+    let active = true;
+    let unsubscribe = () => {};
+    void import('./supabase').then(({ supabase }) => {
+      if (!active || !supabase) return;
+      void supabase.auth.getSession().then(({ data }) => { if (active) setSession(data.session); });
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => { if (active) setSession(nextSession); });
+      unsubscribe = () => subscription.unsubscribe();
+    }).catch(() => { if (active) setToast('社区服务暂时无法连接。'); });
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   useEffect(() => {
@@ -290,7 +303,7 @@ function LifeApp() {
       {nav === 'home' && <HomePage lists={data.checklists} items={data.checklistItems} runs={data.checkRuns} templates={data.checkTemplates} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={activePetReminders} onGo={setNav} onStartRun={startRun} onToggleRun={toggleRunItem} onAddReading={() => setModal('reading')} />}
       {nav === 'lists' && <ListsPage lists={data.checklists} listItems={data.checklistItems} templates={data.checkTemplates} runs={data.checkRuns} selected={selectedChecklist} setSelected={setSelectedChecklist} onNewList={() => setModal('checklist')} onNewItem={(listId) => { setSelectedChecklist(listId); setModal('item'); }} onToggleItem={toggleItem} onNewTemplate={() => setModal('template')} onStartRun={startRun} onToggleRun={toggleRunItem} onExample={createExampleChecklist} onRename={renameChecklist} onArchive={toggleChecklistArchive} onDelete={deleteChecklist} onEditTemplate={editTemplate} onCopyTemplate={copyTemplate} onDeleteTemplate={deleteTemplate} />}
       {nav === 'records' && <RecordsPage tab={recordTab} setTab={setRecordTab} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={data.petEvents} onAddMeter={() => setModal('meter')} onAddReading={() => setModal('reading')} onAddPet={() => setModal('pet')} onAddPetEvent={() => setModal('pet-event')} onToggleEvent={markPetEvent} />}
-      {nav === 'community' && <Community session={session} onOpenMy={() => { setProfileView('home'); setNav('profile'); }} initialProfileId={communityProfileId} onExitUserProfile={() => { setCommunityProfileId(null); setNav('profile'); }} />}
+      {nav === 'community' && <Suspense fallback={<div className="feed-loading"><Icon name="progress_activity" className="spin" />正在打开生活社区…</div>}><Community session={session} onOpenMy={() => { setProfileView('home'); setNav('profile'); }} initialProfileId={communityProfileId} onExitUserProfile={() => { setCommunityProfileId(null); setNav('profile'); }} /></Suspense>}
       {nav === 'profile' && <ProfilePage session={session} view={profileView} setView={setProfileView} onMessage={setToast} onTheme={handleTheme} onExport={exportBackup} onImport={() => setModal('import')} onClear={clearData} onOpenCommunityProfile={(userId) => { setCommunityProfileId(userId); setNav('community'); }} />}
     </main>
     <nav className="bottom-nav" aria-label="主导航">
@@ -375,11 +388,14 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
   const [followingCount, setFollowingCount] = useState(0);
   const [postCount, setPostCount] = useState(0);
   const effective = document.documentElement.dataset.theme === 'dark' ? '夜间' : '日间';
+  const pageFallback = <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在打开账号页面…</div>;
 
   useEffect(() => {
-    if (!session || !supabase) { setAccountProfile(null); setFollowingCount(0); setPostCount(0); return; }
+    if (!session) { setAccountProfile(null); setFollowingCount(0); setPostCount(0); return; }
     let active = true;
     void (async () => {
+      const { supabase } = await import('./supabase');
+      if (!active || !supabase) return;
       const [profileResult, followingResult, postResult] = await Promise.all([
         supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status').eq('id', session.user.id).maybeSingle(),
         supabase.from('follows').select('followee_id', { count: 'exact', head: true }).eq('follower_id', session.user.id),
@@ -393,7 +409,7 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
         value.avatar_url = signed?.signedUrl;
       }
       if (active) { setAccountProfile(value); setFollowingCount(followingResult.count ?? 0); setPostCount(postResult.count ?? 0); }
-    })();
+    })().catch((cause) => { if (active) onMessage(cause instanceof Error ? cause.message : '账号资料加载失败。'); });
     return () => { active = false; };
   }, [session?.user.id, onMessage]);
 
@@ -401,14 +417,14 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
     if (['account', 'edit-profile', 'following', 'posts', 'delete-account', 'logout'].includes(view) && !session) setView('home');
   }, [view, session, setView]);
 
-  if (view === 'auth') return <div className="profile-subpage"><AuthPage onBack={() => setView('home')} onMessage={onMessage} onAuthenticated={() => setView('home')} /></div>;
-  if (view === 'account' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('home')}><Icon name="arrow_back" />返回我的</button><PageTitle eyebrow="ACCOUNT SETTINGS" title="账号设置" /><AccountSettings session={session} onMessage={onMessage} onProfileChange={setAccountProfile} onNavigate={setView} /></div>;
-  if (view === 'edit-profile' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="PROFILE" title="编辑个人资料" /><ProfileEditPage session={session} onMessage={onMessage} onProfileChange={setAccountProfile} onComplete={() => setView('account')} /></div>;
-  if (view === 'change-password' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PasswordChangePage session={session} onMessage={onMessage} onComplete={() => setView('auth')} /></div>;
-  if (view === 'delete-account' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="注销账号" /><DeleteAccountPage onMessage={onMessage} onComplete={() => setView('home')} /></div>;
-  if (view === 'logout' && session) return <div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="退出登录" /><LogoutAccountPage onMessage={onMessage} onComplete={() => setView('home')} /></div>;
-  if (view === 'following' && session) return <FollowingPage session={session} onBack={() => setView('home')} onOpenProfile={onOpenCommunityProfile} onMessage={onMessage} />;
-  if (view === 'posts' && session) return <MyPostsPage session={session} onBack={() => setView('home')} onMessage={onMessage} />;
+  if (view === 'auth') return <Suspense fallback={pageFallback}><div className="profile-subpage"><AuthPage onBack={() => setView('home')} onMessage={onMessage} onAuthenticated={() => setView('home')} /></div></Suspense>;
+  if (view === 'account' && session) return <Suspense fallback={pageFallback}><div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('home')}><Icon name="arrow_back" />返回我的</button><PageTitle eyebrow="ACCOUNT SETTINGS" title="账号设置" /><AccountSettings session={session} onMessage={onMessage} onProfileChange={setAccountProfile} onNavigate={setView} /></div></Suspense>;
+  if (view === 'edit-profile' && session) return <Suspense fallback={pageFallback}><div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="PROFILE" title="编辑个人资料" /><ProfileEditPage session={session} onMessage={onMessage} onProfileChange={setAccountProfile} onComplete={() => setView('account')} /></div></Suspense>;
+  if (view === 'change-password' && session) return <Suspense fallback={pageFallback}><div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PasswordChangePage session={session} onMessage={onMessage} onComplete={() => setView('auth')} /></div></Suspense>;
+  if (view === 'delete-account' && session) return <Suspense fallback={pageFallback}><div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="注销账号" /><DeleteAccountPage onMessage={onMessage} onComplete={() => setView('home')} /></div></Suspense>;
+  if (view === 'logout' && session) return <Suspense fallback={pageFallback}><div className="profile-subpage"><button className="soft-button profile-back" type="button" onClick={() => setView('account')}><Icon name="arrow_back" />返回账号设置</button><PageTitle eyebrow="ACCOUNT SECURITY" title="退出登录" /><LogoutAccountPage onMessage={onMessage} onComplete={() => setView('home')} /></div></Suspense>;
+  if (view === 'following' && session) return <Suspense fallback={pageFallback}><FollowingPage session={session} onBack={() => setView('home')} onOpenProfile={onOpenCommunityProfile} onMessage={onMessage} /></Suspense>;
+  if (view === 'posts' && session) return <Suspense fallback={pageFallback}><MyPostsPage session={session} onBack={() => setView('home')} onMessage={onMessage} /></Suspense>;
 
   return <><PageTitle eyebrow="只属于你的生活空间" title="我的" /><button className="profile-account-entry" type="button" onClick={() => setView(session ? 'account' : 'auth')} aria-label={session ? `账号设置：${accountProfile?.display_name ?? '账号用户'}` : '登录或注册'}><span className="profile-account-avatar">{session && (accountProfile?.avatar_url ? <img src={accountProfile.avatar_url} alt="" /> : <Icon name="person" size={29} />)}</span><span className="profile-account-copy"><span className="profile-account-name">{session ? accountProfile?.display_name || '账号用户' : '登录/注册'}</span></span></button>{session && <section className="profile-community-shortcuts" aria-label="社区个人入口"><button className="profile-community-link" type="button" onClick={() => setView('following')}><span className="profile-shortcut-icon"><Icon name="group" /></span><span><b>我的关注</b><small>查看关注的人</small></span><span className="profile-shortcut-count">{followingCount}</span><Icon name="chevron_right" /></button><button className="profile-community-link" type="button" onClick={() => setView('posts')}><span className="profile-shortcut-icon posts"><Icon name="article" /></span><span><b>我的动态</b><small>查看、编辑或删除我的发布</small></span><span className="profile-shortcut-count">{postCount}</span><Icon name="chevron_right" /></button></section>}<section className="settings-group"><h2>偏好设置</h2><button className="settings-row" onClick={() => void onTheme()}><span className="settings-icon"><Icon name={effective === '夜间' ? 'dark_mode' : 'light_mode'} /></span><span><b>外观主题</b><small>{effective} · 点击切换</small></span><Icon name="chevron_right" /></button><div className="settings-row static"><span className="settings-icon blue"><Icon name="cloud_off" /></span><span><b>数据保存</b><small>清单、抄表和宠物记录保存在本机</small></span></div></section><section className="settings-group"><h2>数据与备份</h2><button className="settings-row" onClick={onExport}><span className="settings-icon green"><Icon name="download" /></span><span><b>导出备份</b><small>保存一份 JSON 文件到设备</small></span><Icon name="chevron_right" /></button><button className="settings-row" onClick={onImport}><span className="settings-icon amber"><Icon name="upload_file" /></span><span><b>导入备份</b><small>合并恢复之前导出的数据</small></span><Icon name="chevron_right" /></button><button className="settings-row danger-row" onClick={onClear}><span className="settings-icon red"><Icon name="delete" /></span><span><b>清除本机记录</b><small>删除全部清单、表具和宠物记录</small></span><Icon name="chevron_right" /></button></section><section className="settings-group"><h2>关于</h2><div className="settings-row static"><span className="settings-icon"><Icon name="info" /></span><span><b>日常有序</b><small>本机生活管理 · 生活社区</small></span><span className="version-chip">v0.1</span></div></section></>;
 }

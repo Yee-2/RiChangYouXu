@@ -7,20 +7,26 @@ import { accountPasswordRule, isValidAccountPassword } from './authValidation';
 
 export type Profile = { id: string; uid?: string; username: string | null; display_name: string; avatar_path: string | null; avatar_url?: string; bio: string; role: 'user' | 'admin'; account_status: 'active' | 'suspended' | 'banned' | 'deleted'; suspension_expires_at?: string | null };
 type Topic = { id: string; slug: string; title: string };
-type Post = { id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; topics?: Topic[]; liked?: boolean; followed?: boolean; likes?: number; comments?: CommentItem[]; images?: string[] };
+type Post = { id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; topics?: Topic[]; liked?: boolean; followed?: boolean; likes?: number; commentCount?: number; comments?: CommentItem[]; images?: string[] };
 type CommentItem = { id: string; post_id: string; author_id: string; body: string; image_paths: string[]; created_at: string; moderation_status: 'visible' | 'hidden' | 'removed'; profile?: Profile; images?: string[] };
 type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: string; review_reason?: string | null; created_at: string };
+const COMMUNITY_PAGE_SIZE = 20;
 
 export default function Community({ session, onOpenMy, initialProfileId, onExitUserProfile }: { session: Session | null; onOpenMy?: () => void; initialProfileId?: string | null; onExitUserProfile?: () => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const postsRequestId = useRef(0);
   const profileRequestId = useRef(0);
+  const engagementRefreshIds = useRef(new Map<string, number>());
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(initialProfileId ?? null);
   const [returnToPersonalPage, setReturnToPersonalPage] = useState(Boolean(initialProfileId));
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
+  const feedPageCount = useRef(0);
   const [showAuthPage, setShowAuthPage] = useState(false);
   const [, refreshStatusClock] = useState(0);
 
@@ -39,12 +45,17 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
     setProfile(value);
   }, [session?.user?.id]);
 
-  const loadPosts = useCallback(async () => {
+  const loadPosts = useCallback(async ({ append = false }: { append?: boolean } = {}) => {
     if (!supabase) return;
     const requestId = ++postsRequestId.current;
-    setLoading(true); setError('');
+    const offset = append ? feedPageCount.current * COMMUNITY_PAGE_SIZE : 0;
+    if (append) { setLoadingMore(true); setLoadMoreError(''); }
+    else { feedPageCount.current = 0; setHasMore(false); setLoading(true); setError(''); setLoadMoreError(''); }
     try {
-      let query = supabase.from('posts').select('id,author_id,body,image_paths,created_at,moderation_status').order('created_at', { ascending: false }).limit(40);
+      const postColumns = 'id,author_id,body,image_paths,created_at,moderation_status';
+      let query = selectedTopic
+        ? supabase.from('posts').select(`${postColumns},post_topics!inner(topic_id)`).eq('post_topics.topic_id', selectedTopic.id)
+        : supabase.from('posts').select(postColumns);
       if (selectedUserId) {
         query = query.eq('author_id', selectedUserId);
         query = selectedUserId === session?.user.id
@@ -53,70 +64,59 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
       }
       else if (session?.user.id) query = query.or(`moderation_status.eq.visible,and(author_id.eq.${session.user.id},moderation_status.eq.hidden)`);
       else query = query.eq('moderation_status', 'visible');
-      if (selectedTopic) {
-        const { data: links, error: linkError } = await supabase.from('post_topics').select('post_id').eq('topic_id', selectedTopic.id);
-        if (linkError) throw linkError;
-        const postIds = (links ?? []).map((link) => link.post_id as string);
-        if (postIds.length === 0) { if (requestId === postsRequestId.current) setPosts([]); return; }
-        query = query.in('id', postIds);
-      }
+      query = query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + COMMUNITY_PAGE_SIZE - 1);
       const { data: rawPosts, error: postError } = await query;
       if (postError) throw postError;
       const list = (rawPosts ?? []) as Post[];
       const ids = list.map((post) => post.id); const authors = [...new Set(list.map((post) => post.author_id))];
-      const [profileResult, topicResult, likeResult, commentResult, followResult] = await Promise.all([
+      const [profileResult, topicResult, engagementResult, followResult] = await Promise.all([
         authors.length ? supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', authors) : Promise.resolve({ data: [], error: null }),
         ids.length ? supabase.from('post_topics').select('post_id,topics(id,slug,title)').in('post_id', ids) : Promise.resolve({ data: [], error: null }),
-        ids.length ? supabase.from('post_likes').select('post_id,user_id').in('post_id', ids) : Promise.resolve({ data: [], error: null }),
-        ids.length ? supabase.from('comments').select('id,post_id,author_id,body,image_paths,created_at,moderation_status').or(session?.user.id ? `moderation_status.eq.visible,and(author_id.eq.${session.user.id},moderation_status.eq.hidden)` : 'moderation_status.eq.visible').in('post_id', ids).order('created_at', { ascending: true }) : Promise.resolve({ data: [], error: null }),
+        ids.length ? supabase.rpc('get_post_engagement', { p_post_ids: ids }) : Promise.resolve({ data: [], error: null }),
         session?.user && authors.length ? supabase.from('follows').select('followee_id').eq('follower_id', session.user.id).in('followee_id', authors) : Promise.resolve({ data: [], error: null })
       ]);
-      if (profileResult.error) throw profileResult.error; if (topicResult.error) throw topicResult.error; if (likeResult.error) throw likeResult.error; if (commentResult.error) throw commentResult.error; if (followResult.error) throw followResult.error;
+      if (profileResult.error) throw profileResult.error; if (topicResult.error) throw topicResult.error; if (engagementResult.error) throw engagementResult.error; if (followResult.error) throw followResult.error;
       const people = new Map(((profileResult.data ?? []) as Profile[]).map((item) => [item.id, item]));
       const topicLinks = new Map<string, Topic[]>();
       for (const row of (topicResult.data ?? []) as Array<{ post_id: string; topics: Topic | Topic[] | null }>) {
         const topic = Array.isArray(row.topics) ? row.topics[0] : row.topics;
         if (topic) topicLinks.set(row.post_id, [...(topicLinks.get(row.post_id) ?? []), topic]);
       }
-      const likes = likeResult.data ?? []; const comments = (commentResult.data ?? []) as CommentItem[]; const followed = new Set((followResult.data ?? []).map((item) => item.followee_id as string));
-      const likeCounts = new Map<string, number>();
-      const likedPostIds = new Set<string>();
-      for (const like of likes) {
-        const postId = like.post_id as string;
-        likeCounts.set(postId, (likeCounts.get(postId) ?? 0) + 1);
-        if (like.user_id === session?.user.id) likedPostIds.add(postId);
-      }
-      const commentAuthors = [...new Set(comments.map((comment) => comment.author_id))];
-      const commentProfiles = commentAuthors.length ? await supabase.from('profiles').select('id,username,display_name,avatar_path,bio,role,account_status,suspension_expires_at').in('id', commentAuthors) : { data: [], error: null };
-      if (commentProfiles.error) throw commentProfiles.error;
-      for (const item of (commentProfiles.data ?? []) as Profile[]) people.set(item.id, item);
-      const signedPaths = [...new Set([...list.flatMap((post) => post.image_paths), ...comments.flatMap((comment) => comment.image_paths), ...[...people.values()].map((person) => person.avatar_path).filter((path): path is string => Boolean(path))])];
+      const engagements = new Map(((engagementResult.data ?? []) as Array<{ post_id: string; like_count: number; viewer_liked: boolean; comment_count: number }>).map((item) => [item.post_id, item]));
+      const followed = new Set((followResult.data ?? []).map((item) => item.followee_id as string));
+      const signedPaths = [...new Set([...list.flatMap((post) => post.image_paths), ...[...people.values()].map((person) => person.avatar_path).filter((path): path is string => Boolean(path))])];
       const signed = signedPaths.length ? await supabase.storage.from('community-media').createSignedUrls(signedPaths, 3600) : { data: [], error: null };
       if (signed.error) throw signed.error;
       const urls = new Map((signed.data ?? []).map((file) => [file.path ?? '', file.signedUrl ?? '']));
       for (const person of people.values()) if (person.avatar_path) person.avatar_url = urls.get(person.avatar_path);
-      const decoratedComments = comments.map((comment) => ({ ...comment, profile: people.get(comment.author_id), images: comment.image_paths.map((path) => urls.get(path) ?? '').filter(Boolean) }));
-      const commentsByPost = new Map<string, typeof decoratedComments>();
-      for (const comment of decoratedComments) {
-        const postComments = commentsByPost.get(comment.post_id);
-        if (postComments) postComments.push(comment);
-        else commentsByPost.set(comment.post_id, [comment]);
-      }
       if (requestId !== postsRequestId.current) return;
-      setPosts(list.map((post) => ({
+      const decoratedPosts = list.map((post) => {
+        const engagement = engagements.get(post.id);
+        return {
         ...post, profile: people.get(post.author_id), topics: topicLinks.get(post.id) ?? [],
-        liked: likedPostIds.has(post.id),
+        liked: engagement?.viewer_liked ?? false,
         followed: followed.has(post.author_id),
-        likes: likeCounts.get(post.id) ?? 0,
-        comments: commentsByPost.get(post.id) ?? [],
+        likes: engagement?.like_count ?? 0,
+        commentCount: engagement?.comment_count ?? 0,
+        comments: [],
         images: post.image_paths.map((path) => urls.get(path) ?? '').filter(Boolean)
-      })));
-    } catch (cause) { if (requestId === postsRequestId.current) setError(cause instanceof Error ? cause.message : '动态加载失败，请稍后重试。'); }
-    finally { if (requestId === postsRequestId.current) setLoading(false); }
+        };
+      });
+      setPosts((current) => append ? [...current, ...decoratedPosts] : decoratedPosts);
+      feedPageCount.current = append ? feedPageCount.current + 1 : 1;
+      setHasMore(list.length === COMMUNITY_PAGE_SIZE);
+    } catch (cause) {
+      if (requestId === postsRequestId.current) {
+        const message = cause instanceof Error ? cause.message : '动态加载失败，请稍后重试。';
+        if (append) setLoadMoreError(message); else setError(message);
+      }
+    } finally {
+      if (requestId === postsRequestId.current) { setLoading(false); setLoadingMore(false); }
+    }
   }, [selectedTopic?.id, selectedUserId, session?.user?.id]);
 
   useEffect(() => { void loadProfile(); }, [loadProfile]);
-  useEffect(() => { void loadPosts(); }, [loadPosts]);
+  useEffect(() => { feedPageCount.current = 0; engagementRefreshIds.current.clear(); setPosts([]); setHasMore(true); void loadPosts(); }, [loadPosts]);
   useEffect(() => {
     if (!initialProfileId) return;
     setSelectedUserId(initialProfileId);
@@ -126,6 +126,56 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
     const timer = window.setInterval(() => refreshStatusClock(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const refreshLoadedPosts = useCallback(async (postId?: string, removePost = false, refreshFollow = false) => {
+    if (removePost && postId) {
+      setPosts((current) => current.filter((post) => post.id !== postId));
+      postId = undefined;
+    }
+    if (postId && supabase) {
+      const feedRequestId = postsRequestId.current;
+      const requestId = (engagementRefreshIds.current.get(postId) ?? 0) + 1;
+      engagementRefreshIds.current.set(postId, requestId);
+      try {
+        const [engagementResult, followResult] = await Promise.all([
+          supabase.rpc('get_post_engagement', { p_post_ids: [postId] }),
+          refreshFollow && session?.user.id
+            ? supabase.from('follows').select('followee_id').eq('follower_id', session.user.id).eq('followee_id', posts.find((post) => post.id === postId)?.author_id ?? '')
+            : Promise.resolve({ data: [], error: null })
+        ]);
+        if (engagementResult.error) throw engagementResult.error;
+        if (followResult.error) throw followResult.error;
+        if (postsRequestId.current !== feedRequestId || engagementRefreshIds.current.get(postId) !== requestId) return;
+        const engagement = (engagementResult.data ?? [])[0] as { like_count: number; viewer_liked: boolean; comment_count: number } | undefined;
+        const followed = Boolean(followResult.data?.length);
+        setPosts((current) => current.map((post) => post.id === postId ? {
+          ...post,
+          likes: engagement?.like_count ?? 0,
+          liked: engagement?.viewer_liked ?? false,
+          commentCount: engagement?.comment_count ?? 0,
+          ...(refreshFollow ? { followed } : {})
+        } : post));
+      } catch (cause) {
+        if (postsRequestId.current === feedRequestId && engagementRefreshIds.current.get(postId) === requestId) setError(cause instanceof Error ? cause.message : '互动状态刷新失败。');
+      }
+      return;
+    }
+    const loadedPages = Math.max(feedPageCount.current, 1);
+    let requestId = postsRequestId.current + 1;
+    await loadPosts();
+    if (requestId !== postsRequestId.current || feedPageCount.current === 0) return;
+    for (let page = 1; page < loadedPages; page += 1) {
+      if (requestId !== postsRequestId.current) return;
+      const expectedPageCount = feedPageCount.current + 1;
+      requestId = postsRequestId.current + 1;
+      await loadPosts({ append: true });
+      if (requestId !== postsRequestId.current || feedPageCount.current !== expectedPageCount) return;
+    }
+  }, [loadPosts, posts, session?.user.id]);
+  const loadMoreControls = <>
+    {loadMoreError && <div className="community-alert" role="alert">{loadMoreError}<button type="button" onClick={() => void loadPosts({ append: true })}>重试</button></div>}
+    {hasMore && posts.length > 0 && <div className="feed-loading"><button className="soft-button" type="button" disabled={loadingMore} onClick={() => void loadPosts({ append: true })}>{loadingMore ? '正在加载…' : '加载更多动态'}</button></div>}
+  </>;
 
   if (!communityConfigured || !supabase) return <section className="community-cover"><div className="community-spark"><Icon name="forum" /></div><p className="eyebrow">COMMUNITY</p><h1>把生活里的小事<br /><span>分享给同频的人</span></h1><p className="muted">登录后查看社区动态、参与话题，也可以发布图文和评论。</p><div className="community-preview"><span># 宠物日记</span><span># 今天的小确幸</span><span># 生活灵感</span></div><p className="muted">社区服务暂未配置，请稍后再来。</p></section>;
 
@@ -137,15 +187,15 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
     if (returnToPersonalPage && onExitUserProfile) onExitUserProfile();
     else setSelectedUserId(null);
   };
-  if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={closeUserProfile}><Icon name="arrow_back" />{returnToPersonalPage ? '返回我的' : '返回社区'}</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{error}</div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? posts.map((post) => <PostCard key={post.id} post={post} session={session} profile={profile} onRefresh={loadPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />) : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
+  if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={closeUserProfile}><Icon name="arrow_back" />{returnToPersonalPage ? '返回我的' : '返回社区'}</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{error}<button type="button" onClick={() => void loadPosts()}>重试</button></div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? <>{posts.map((post) => <PostCard key={`${session?.user.id ?? 'anonymous'}:${post.id}`} post={post} session={session} profile={profile} onRefresh={refreshLoadedPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />)}{loadMoreControls}</> : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
   return <div className="community-page">
     <div className="community-title"><div><p className="eyebrow">SHARE A LITTLE JOY</p><h1>生活社区</h1><p>记录生活的小事，也看看别人的可爱日常。</p></div>{profile?.role === 'admin' && profile.account_status === 'active' && <a className="soft-button admin-entry" href={import.meta.env.DEV ? `${window.location.origin}/#/admin` : 'https://admin.yeecc.cn/'}><Icon name="admin_panel_settings" />管理后台</a>}</div>
     {session && profile && effectiveProfileStatus(profile) !== 'active' && <div className="community-alert">账号当前状态：{profile.account_status === 'suspended' ? `暂停中${profile.suspension_expires_at ? `，预计 ${new Date(profile.suspension_expires_at).toLocaleString('zh-CN')} 恢复` : ''}` : profile.account_status === 'banned' ? '永久封禁，社区发布和互动已关闭。' : '已注销'}。{profile.account_status !== 'deleted' && '如需了解处理原因，请联系管理员。'}</div>}
     <div className="community-feed-layout"><aside className="topic-rail"><h3>热门话题</h3><p className={!selectedTopic ? 'topic-link selected' : 'topic-link'} onClick={() => setSelectedTopic(null)}>全部动态</p>{['宠物日记','生活碎片','今日好心情','养宠新手','居家日常'].map((title) => <TopicShortcut key={title} title={title} active={selectedTopic?.title === title} onClick={(topic) => setSelectedTopic(topic)} />)}<div className="small-note">动态支持图片、表情、话题和评论。</div></aside><div className="feed-main">
-      {session && profile && effectiveProfileStatus(profile) === 'active' && <Composer userId={session.user.id} onPosted={loadPosts} onError={setError} />}
+      {session && profile && effectiveProfileStatus(profile) === 'active' && <Composer userId={session.user.id} onPosted={refreshLoadedPosts} onError={setError} />}
       {selectedTopic && <div className="topic-heading"><div><small>正在浏览话题</small><h2>#{selectedTopic.title}</h2></div><button className="icon-button" onClick={() => setSelectedTopic(null)} aria-label="清除话题筛选"><Icon name="close" /></button></div>}
       {error && <div className="community-alert" role="alert">{error}<button onClick={() => void loadPosts()}>重试</button></div>}
-      {loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载新鲜动态…</div> : posts.length ? posts.map((post) => <PostCard key={post.id} post={post} session={session} profile={profile} onRefresh={loadPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />) : <div className="feed-empty"><Icon name="auto_awesome" /><h3>{selectedTopic ? '这个话题还没有动态' : '这里还很安静'}</h3><p>来分享一件今天的小事吧。</p></div>}
+      {loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载新鲜动态…</div> : posts.length ? <>{posts.map((post) => <PostCard key={`${session?.user.id ?? 'anonymous'}:${post.id}`} post={post} session={session} profile={profile} onRefresh={refreshLoadedPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />)}{loadMoreControls}</> : <div className="feed-empty"><Icon name="auto_awesome" /><h3>{selectedTopic ? '这个话题还没有动态' : '这里还很安静'}</h3><p>来分享一件今天的小事吧。</p></div>}
     </div></div>
   </div>;
 }
@@ -385,7 +435,7 @@ export function MyPostsPage({ session, onBack, onMessage }: { session: Session; 
     const offset = append ? posts.length : 0;
     append ? setLoadingMore(true) : setLoading(true);
     setError('');
-    const { data, error: queryError } = await supabase.from('posts').select('id,body,image_paths,created_at,moderation_status').eq('author_id', session.user.id).in('moderation_status', ['visible', 'hidden']).order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + 39);
+    const { data, error: queryError } = await supabase.from('posts').select('id,body,image_paths,created_at,moderation_status').eq('author_id', session.user.id).in('moderation_status', ['visible', 'hidden']).order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + COMMUNITY_PAGE_SIZE - 1);
     if (queryError) { setError(queryError.message); setLoading(false); setLoadingMore(false); return; }
     const rows = (data ?? []) as OwnedPost[];
     const paths = [...new Set(rows.flatMap((item) => item.image_paths))];
@@ -397,7 +447,7 @@ export function MyPostsPage({ session, onBack, onMessage }: { session: Session; 
     }
     const mapped = rows.map((item) => ({ ...item, images: item.image_paths.map((path) => signedByPath.get(path) ?? '').filter(Boolean) }));
     setPosts((current) => append ? [...current, ...mapped] : mapped);
-    setHasMore(rows.length === 40); setLoading(false); setLoadingMore(false);
+    setHasMore(rows.length === COMMUNITY_PAGE_SIZE); setLoading(false); setLoadingMore(false);
   }, [session.user.id, posts.length]);
 
   useEffect(() => { void load(); }, [session.user.id]);
@@ -694,16 +744,78 @@ function TopicShortcut({ title, active, onClick }: { title: string; active: bool
   return <button className={`topic-shortcut ${active ? 'active' : ''}`} onClick={() => void open()}><span>#</span>{title}<Icon name="arrow_outward" /></button>;
 }
 
-function PostCard({ post, session, profile, onRefresh, onError, onTopic, onOpenProfile }: { post: Post; session: Session | null; profile: Profile | null; onRefresh: () => void; onError: (message: string) => void; onTopic: (topic: Topic) => void; onOpenProfile: (userId: string) => void }) {
-  const [showComments, setShowComments] = useState(false); const [comment, setComment] = useState(''); const [commentFiles, setCommentFiles] = useState<File[]>([]); const [commentPreviews, setCommentPreviews] = useState<string[]>([]); const [busy, setBusy] = useState(false); const commentFileInput = useRef<HTMLInputElement>(null);
+function PostCard({ post, session, profile, onRefresh, onError, onTopic, onOpenProfile }: { post: Post; session: Session | null; profile: Profile | null; onRefresh: (postId?: string, removePost?: boolean, refreshFollow?: boolean) => Promise<void>; onError: (message: string) => void; onTopic: (topic: Topic) => void; onOpenProfile: (userId: string) => void }) {
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [commentCount, setCommentCount] = useState(post.commentCount ?? 0);
+  const [commentsLoaded, setCommentsLoaded] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
+  const [commentsHasMore, setCommentsHasMore] = useState(false);
+  const [commentsError, setCommentsError] = useState('');
+  const commentRequestId = useRef(0);
+  const commentRequestMode = useRef<'idle' | 'initial' | 'more'>('idle');
+  const [comment, setComment] = useState('');
+  const [commentFiles, setCommentFiles] = useState<File[]>([]);
+  const [commentPreviews, setCommentPreviews] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const commentFileInput = useRef<HTMLInputElement>(null);
   useEffect(() => { const urls = commentFiles.map((file) => URL.createObjectURL(file)); setCommentPreviews(urls); return () => urls.forEach(URL.revokeObjectURL); }, [commentFiles]);
+  useEffect(() => { setCommentCount(post.commentCount ?? 0); }, [post.commentCount]);
   const name = post.profile?.display_name ?? '生活用户'; const date = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(post.created_at));
-  const toggleLike = async () => { if (!supabase || !session) { onError('请先登录再点赞。'); return; } const result = post.liked ? await supabase.from('post_likes').delete().eq('post_id', post.id).eq('user_id', session.user.id) : await supabase.from('post_likes').insert({ post_id: post.id, user_id: session.user.id }); if (result.error) onError(result.error.message); else onRefresh(); };
-  const submitComment = async (event: FormEvent) => { event.preventDefault(); if (!supabase || !session || (!comment.trim() && !commentFiles.length)) return; if (commentFiles.length > 4 || commentFiles.some((file) => file.size > 5 * 1024 * 1024 || !['image/jpeg','image/png','image/webp','image/gif'].includes(file.type))) { onError('评论最多附 4 张图片，单张不超过 5 MB。'); return; } setBusy(true); try { const paths: string[] = []; for (const file of commentFiles) { const path = `${session.user.id}/${crypto.randomUUID()}.${file.type.split('/')[1].replace('jpeg','jpg')}`; const { error } = await supabase.storage.from('community-media').upload(path, file, { contentType: file.type }); if (error) throw error; paths.push(path); } const { error } = await supabase.from('comments').insert({ post_id: post.id, author_id: session.user.id, body: comment.trim(), image_paths: paths }); if (error) throw error; setComment(''); setCommentFiles([]); onRefresh(); } catch (cause) { onError(cause instanceof Error ? cause.message : '评论发送失败，请重试。'); } finally { setBusy(false); } };
+  const loadComments = async (append = false, force = false) => {
+    if (!supabase || (commentRequestMode.current !== 'idle' && !force)) return;
+    const requestId = ++commentRequestId.current;
+    const offset = append ? comments.length : 0;
+    commentRequestMode.current = append ? 'more' : 'initial';
+    if (append) setCommentsLoadingMore(true); else setCommentsLoading(true);
+    setCommentsError('');
+    try {
+      let query = supabase.from('comments').select('id,post_id,author_id,body,image_paths,created_at,moderation_status', { count: 'exact' }).eq('post_id', post.id);
+      query = session?.user.id
+        ? query.or(`moderation_status.eq.visible,and(author_id.eq.${session.user.id},moderation_status.eq.hidden)`)
+        : query.eq('moderation_status', 'visible');
+      const { data, count, error: commentsQueryError } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + COMMUNITY_PAGE_SIZE - 1);
+      if (commentsQueryError) throw commentsQueryError;
+      const rows = (data ?? []) as CommentItem[];
+      const authors = [...new Set(rows.map((item) => item.author_id))];
+      const profiles = authors.length ? await supabase.from('profiles').select('id,display_name,avatar_path').in('id', authors) : { data: [], error: null };
+      if (profiles.error) throw profiles.error;
+      const people = new Map(((profiles.data ?? []) as Array<Pick<Profile, 'id' | 'display_name' | 'avatar_path'>>).map((item) => [item.id, item]));
+      const paths = [...new Set([...rows.flatMap((item) => item.image_paths), ...[...people.values()].map((item) => item.avatar_path).filter((path): path is string => Boolean(path))])];
+      const signed = paths.length ? await supabase.storage.from('community-media').createSignedUrls(paths, 3600) : { data: [], error: null };
+      if (signed.error) throw signed.error;
+      const urls = new Map((signed.data ?? []).map((file) => [file.path ?? '', file.signedUrl ?? '']));
+      const decorated = rows.map((item) => ({ ...item, profile: people.get(item.author_id) as Profile | undefined, images: item.image_paths.map((path) => urls.get(path) ?? '').filter(Boolean) }));
+      if (requestId !== commentRequestId.current) return;
+      setComments((current) => {
+        if (!append) return decorated;
+        const seen = new Set(current.map((item) => item.id));
+        return [...current, ...decorated.filter((item) => !seen.has(item.id))];
+      });
+      setCommentCount(count ?? post.commentCount ?? 0);
+      setCommentsHasMore((count ?? offset + rows.length) > offset + rows.length);
+      setCommentsLoaded(true);
+    } catch (cause) {
+      if (requestId === commentRequestId.current) setCommentsError(cause instanceof Error ? cause.message : '评论加载失败，请重试。');
+    } finally {
+      if (requestId === commentRequestId.current) {
+        commentRequestMode.current = 'idle';
+        setCommentsLoading(false); setCommentsLoadingMore(false);
+      }
+    }
+  };
+  const toggleComments = () => {
+    const open = !showComments;
+    setShowComments(open);
+    if (open && !commentsLoaded) void loadComments();
+  };
+  const toggleLike = async () => { if (!supabase || !session) { onError('请先登录再点赞。'); return; } const result = post.liked ? await supabase.from('post_likes').delete().eq('post_id', post.id).eq('user_id', session.user.id) : await supabase.from('post_likes').insert({ post_id: post.id, user_id: session.user.id }); if (result.error) onError(result.error.message); else void onRefresh(post.id); };
+  const submitComment = async (event: FormEvent) => { event.preventDefault(); if (!supabase || !session || (!comment.trim() && !commentFiles.length)) return; if (commentFiles.length > 4 || commentFiles.some((file) => file.size > 5 * 1024 * 1024 || !['image/jpeg','image/png','image/webp','image/gif'].includes(file.type))) { onError('评论最多附 4 张图片，单张不超过 5 MB。'); return; } setBusy(true); try { const paths: string[] = []; for (const file of commentFiles) { const path = `${session.user.id}/${crypto.randomUUID()}.${file.type.split('/')[1].replace('jpeg','jpg')}`; const { error } = await supabase.storage.from('community-media').upload(path, file, { contentType: file.type }); if (error) throw error; paths.push(path); } const { error } = await supabase.from('comments').insert({ post_id: post.id, author_id: session.user.id, body: comment.trim(), image_paths: paths }); if (error) throw error; setComment(''); setCommentFiles([]); setShowComments(true); setCommentsLoaded(false); setCommentCount((current) => current + 1); void loadComments(false, true); void onRefresh(post.id); } catch (cause) { onError(cause instanceof Error ? cause.message : '评论发送失败，请重试。'); } finally { setBusy(false); } };
   const report = async (kind: 'post' | 'user' | 'comment', targetId: string) => { if (!supabase || !session) { onError('登录后可以提交举报。'); return; } const reason = window.prompt('请简要说明举报原因：')?.trim(); if (!reason) return; const { error } = await supabase.from('reports').insert({ reporter_id: session.user.id, target_type: kind, target_id: targetId, reason }); if (error) onError(error.message); else onError('举报已提交，管理员会尽快查看。'); };
-  const deletePost = async () => { if (!supabase || !session || !window.confirm('删除这条动态及其评论？相关图片也会一起删除。')) return; const { data, error } = await supabase.functions.invoke('delete-content', { body: { targetType: 'post', targetId: post.id } }); const failure = await readFunctionFailure(error, data); if (error || failure?.error) { onError(failure?.error ?? error?.message ?? '动态删除失败。'); if (failure?.partial) onRefresh(); } else onRefresh(); };
-  const deleteComment = async (comment: CommentItem) => { if (!supabase || !window.confirm('删除这条评论和图片？')) return; const { data, error } = await supabase.functions.invoke('delete-content', { body: { targetType: 'comment', targetId: comment.id } }); const failure = await readFunctionFailure(error, data); if (error || failure?.error) { onError(failure?.error ?? error?.message ?? '评论删除失败。'); if (failure?.partial) onRefresh(); } else onRefresh(); };
-  const follow = async () => { if (!supabase || !session) { onError('请先登录再关注用户。'); return; } const { data: existing } = await supabase.from('follows').select('follower_id').eq('follower_id', session.user.id).eq('followee_id', post.author_id).maybeSingle(); const result = existing ? await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('followee_id', post.author_id) : await supabase.from('follows').insert({ follower_id: session.user.id, followee_id: post.author_id }); if (result.error) onError(result.error.message); else onRefresh(); };
+  const deletePost = async () => { if (!supabase || !session || !window.confirm('删除这条动态及其评论？相关图片也会一起删除。')) return; const { data, error } = await supabase.functions.invoke('delete-content', { body: { targetType: 'post', targetId: post.id } }); const failure = await readFunctionFailure(error, data); if (error || failure?.error) { onError(failure?.error ?? error?.message ?? '动态删除失败。'); if (failure?.partial) void onRefresh(); } else void onRefresh(post.id, true); };
+  const deleteComment = async (comment: CommentItem) => { if (!supabase || !window.confirm('删除这条评论和图片？')) return; const { data, error } = await supabase.functions.invoke('delete-content', { body: { targetType: 'comment', targetId: comment.id } }); const failure = await readFunctionFailure(error, data); if (error || failure?.error) { onError(failure?.error ?? error?.message ?? '评论删除失败。'); if (failure?.partial) void onRefresh(post.id); } else { await loadComments(false, true); await onRefresh(post.id); } };
+  const follow = async () => { if (!supabase || !session) { onError('请先登录再关注用户。'); return; } const { data: existing } = await supabase.from('follows').select('follower_id').eq('follower_id', session.user.id).eq('followee_id', post.author_id).maybeSingle(); const result = existing ? await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('followee_id', post.author_id) : await supabase.from('follows').insert({ follower_id: session.user.id, followee_id: post.author_id }); if (result.error) onError(result.error.message); else void onRefresh(post.id, false, true); };
   const isFollowingSelf = session?.user.id === post.author_id;
   const followingText = post.followed ? '已关注' : '关注';
   return <article className={`post-card ${post.moderation_status === 'hidden' ? 'post-pending-delete' : ''}`}><header className="post-head"><button className="post-author-link" onClick={() => onOpenProfile(post.author_id)} aria-label={`查看${name}的主页`}><div className="post-avatar">{post.profile?.avatar_url ? <img src={post.profile.avatar_url} alt="" /> : name.slice(0,1)}</div><div className="post-author"><b>{name}</b><small>{date}</small></div></button>{session && <>{!isFollowingSelf && post.moderation_status === 'visible' && <button className="follow-button" onClick={() => void follow()}><Icon name={post.followed ? 'person_check' : 'person_add'} />{followingText}</button>}{(post.author_id === session.user.id || post.moderation_status === 'visible') && <PostActionsMenu isOwner={post.author_id === session.user.id} isHidden={post.moderation_status === 'hidden'} onDelete={() => void deletePost()} onReport={() => void report('post', post.id)} />}</>}</header>
@@ -711,8 +823,15 @@ function PostCard({ post, session, profile, onRefresh, onError, onTopic, onOpenP
     {post.body && <p className="post-body">{renderHashtags(post.body, post.topics ?? [], onTopic)}</p>}
     {post.images?.length ? <div className={`post-images count-${Math.min(post.images.length, 4)}`}>{post.images.map((url) => <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="动态图片" loading="lazy" /></a>)}</div> : null}
     {post.topics && post.topics.length > 0 && <div className="post-topics">{post.topics.map((topic) => <button key={topic.id} onClick={() => onTopic(topic)}>#{topic.title}</button>)}</div>}
-    {post.moderation_status === 'visible' && <div className="post-actions"><button className={post.liked ? 'liked' : ''} onClick={() => void toggleLike()}><Icon name={post.liked ? 'favorite' : 'favorite_border'} />{post.likes ?? 0}</button><button onClick={() => setShowComments(!showComments)}><Icon name="chat_bubble" />{post.comments?.length ?? 0}</button><button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#post-${post.id}`).then(() => onError('动态链接已复制。')).catch(() => onError('复制失败，请手动分享链接。'))}><Icon name="ios_share" />分享</button></div>}
-    {showComments && <div className="comments-panel">{(post.comments ?? []).map((item) => <div className={`comment-row ${item.moderation_status === 'hidden' ? 'comment-pending-delete' : ''}`} key={item.id}><button type="button" className="comment-author-link" onClick={() => onOpenProfile(item.author_id)}><div className="comment-avatar">{item.profile?.avatar_url ? <img src={item.profile.avatar_url} alt="" /> : (item.profile?.display_name ?? '生').slice(0,1)}</div><b>{item.profile?.display_name ?? '生活用户'}</b></button><span>{item.body}{item.images?.length ? <span className="comment-images">{item.images.map((url) => <img key={url} src={url} alt="评论图片" loading="lazy" />)}</span> : null}{item.moderation_status === 'hidden' && <small className="pending-comment-label">清理中，其他用户不可见</small>}</span>{item.author_id === session?.user.id && <button type="button" onClick={() => void deleteComment(item)}>{item.moderation_status === 'hidden' ? '继续删除' : '删除'}</button>}{session && item.author_id !== session.user.id && item.moderation_status === 'visible' && <button type="button" onClick={() => void report('comment', item.id)}>举报</button>}</div>)}{session && profile && effectiveProfileStatus(profile) === 'active' && <form className="comment-form" onSubmit={submitComment}><div className="comment-input-wrap"><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="留一句友善的评论…" maxLength={2000} /><button className="comment-attach" type="button" aria-label="添加评论图片" title="添加图片" onClick={() => commentFileInput.current?.click()}><Icon name="add_photo_alternate" /></button><input ref={commentFileInput} className="visually-hidden-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { setCommentFiles(Array.from(event.currentTarget.files ?? []).slice(0,4)); event.currentTarget.value = ''; }} /></div><button className="primary-button compact comment-send" type="submit" disabled={busy || (!comment.trim() && !commentFiles.length)}>{busy ? '发送中…' : '发送'}</button>{commentPreviews.length > 0 && <div className="comment-previews">{commentPreviews.map((url) => <img key={url} src={url} alt="评论图片预览" />)}</div>}<EmojiPicker onSelect={(emoji) => setComment((previous) => `${previous}${emoji}`)} /></form>}</div>}
+    {post.moderation_status === 'visible' && <div className="post-actions"><button className={post.liked ? 'liked' : ''} onClick={() => void toggleLike()}><Icon name={post.liked ? 'favorite' : 'favorite_border'} />{post.likes ?? 0}</button><button aria-expanded={showComments} onClick={toggleComments}><Icon name="chat_bubble" />{commentCount}</button><button onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#post-${post.id}`).then(() => onError('动态链接已复制。')).catch(() => onError('复制失败，请手动分享链接。'))}><Icon name="ios_share" />分享</button></div>}
+    {showComments && <div className="comments-panel">
+      {commentsLoading && comments.length === 0 && <div className="feed-loading"><Icon name="progress_activity" className="spin" />正在加载评论…</div>}
+      {commentsError && <div className="community-alert" role="alert">{commentsError}<button type="button" onClick={() => void loadComments(comments.length > 0)}>重试</button></div>}
+      {!commentsLoading && comments.length === 0 && !commentsError && <p className="muted">还没有评论。</p>}
+      {comments.map((item) => <div className={`comment-row ${item.moderation_status === 'hidden' ? 'comment-pending-delete' : ''}`} key={item.id}><button type="button" className="comment-author-link" onClick={() => onOpenProfile(item.author_id)}><div className="comment-avatar">{item.profile?.avatar_url ? <img src={item.profile.avatar_url} alt="" /> : (item.profile?.display_name ?? '生').slice(0,1)}</div><b>{item.profile?.display_name ?? '生活用户'}</b></button><span>{item.body}{item.images?.length ? <span className="comment-images">{item.images.map((url) => <img key={url} src={url} alt="评论图片" loading="lazy" />)}</span> : null}{item.moderation_status === 'hidden' && <small className="pending-comment-label">清理中，其他用户不可见</small>}</span>{item.author_id === session?.user.id && <button type="button" onClick={() => void deleteComment(item)}>{item.moderation_status === 'hidden' ? '继续删除' : '删除'}</button>}{session && item.author_id !== session.user.id && item.moderation_status === 'visible' && <button type="button" onClick={() => void report('comment', item.id)}>举报</button>}</div>)}
+      {commentsHasMore && <button className="soft-button" type="button" disabled={commentsLoadingMore} onClick={() => void loadComments(true)}>{commentsLoadingMore ? '正在加载…' : '加载更早评论'}</button>}
+      {session && profile && effectiveProfileStatus(profile) === 'active' && <form className="comment-form" onSubmit={submitComment}><div className="comment-input-wrap"><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="留一句友善的评论…" maxLength={2000} /><button className="comment-attach" type="button" aria-label="添加评论图片" title="添加图片" onClick={() => commentFileInput.current?.click()}><Icon name="add_photo_alternate" /></button><input ref={commentFileInput} className="visually-hidden-file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={(event) => { setCommentFiles(Array.from(event.currentTarget.files ?? []).slice(0,4)); event.currentTarget.value = ''; }} /></div><button className="primary-button compact comment-send" type="submit" disabled={busy || (!comment.trim() && !commentFiles.length)}>{busy ? '发送中…' : '发送'}</button>{commentPreviews.length > 0 && <div className="comment-previews">{commentPreviews.map((url) => <img key={url} src={url} alt="评论图片预览" />)}</div>}<EmojiPicker onSelect={(emoji) => setComment((previous) => `${previous}${emoji}`)} /></form>}
+    </div>}
   </article>;
 }
 

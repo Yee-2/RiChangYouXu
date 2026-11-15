@@ -25,6 +25,7 @@ The production build reports a 581 KB minified entry chunk (about 168 KB gzip). 
 - Load the community root and profile/account subpages through `React.lazy` wrappers backed by dynamic imports of the existing module exports.
 - Add local Suspense fallbacks for the relevant route areas so opening a lazy page shows a small loading state.
 - Keep the admin portal's existing lazy loading. Do not add broad manual chunk rules unless the production build shows they materially reduce initial downloaded bytes; chunking vendor code alone does not defer it.
+- Exclude the community, Supabase, and admin route chunks from the install-time precache so lazy loading also reduces first-visit background downloads. Cache those hashed chunks on demand for up to 30 days; community and admin features still require network access for data.
 
 ### Feed pagination
 
@@ -51,6 +52,7 @@ The production build reports a 581 KB minified entry chunk (about 168 KB gzip). 
 ## Verification
 
 - Run `npm run build` and compare emitted entry and lazy chunk sizes with the current 581 KB entry chunk.
+- Inspect the generated service worker to confirm route chunks are omitted from precache and use the on-demand runtime cache.
 - Check `git diff --check`.
 - Exercise feed first page, load more, topic filtering, own/public profile feeds, empty results, opening and paging comments, new comments, and likes in the browser when a configured Supabase session is available.
 - Review the SQL function's privileges and execute plan against the project's Supabase database when its connection is available.

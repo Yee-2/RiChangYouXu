@@ -2,7 +2,7 @@
 
 版本：0.1.0
 
-文档更新时间：2026-11-08
+文档更新时间：2026-11-15
 
 后端：Supabase Auth、PostgREST、Storage、Edge Functions
 
@@ -72,14 +72,15 @@ Auth 邮件由 Supabase Auth 生成验证码并经 Resend SMTP 投递。项目 S
 
 | 资源 | 方法与路径 | 用途 / 权限 |
 |---|---|---|
-| `posts` | `GET /posts?moderation_status=eq.visible&order=created_at.desc&limit=40` | 读取可见动态；RLS 允许公开读取，普通 App 在未登录时仍显示登录引导 |
+| `posts` | `GET /posts?moderation_status=eq.visible&order=created_at.desc,id.desc&limit=20&offset=0` | 动态列表按 20 条稳定分页；RLS 允许公开读取，普通 App 在未登录时仍显示登录引导 |
 | `posts` | `POST /posts` | 登录用户以自己的 `author_id` 创建文字/图片动态；数据库默认状态为 `visible` |
 | `posts` | `POST /rpc/update_own_post` | 作者原子修改自己可见动态的正文，并重新同步 `#话题`；参数为 `p_post_id`、`p_body` |
+| `posts` | `POST /rpc/get_post_engagement` | 输入最多 20 个 `p_post_ids`，按现有 RLS 返回每条动态的点赞数、当前用户是否点赞及当前用户可读取的评论总数；函数为 `SECURITY INVOKER`，仅 `anon` 与 `authenticated` 获准执行 |
 | `topics` | `GET /topics?slug=eq.{slug}` | 查找话题 |
 | `topics` | `POST /topics` | 登录用户创建话题，slug/title 唯一 |
 | `post_topics` | `GET /post_topics?post_id=eq.{id}` | 读取动态话题；嵌套关联 `topics(id,slug,title)` |
 | `post_topics` | `POST /post_topics` | 仅能为自己的动态添加话题 |
-| `comments` | `GET /comments?post_id=eq.{id}&moderation_status=eq.visible` | 读取可见评论 |
+| `comments` | `GET /comments?post_id=eq.{id}&order=created_at.desc,id.desc&limit=20&offset=0` | 展开评论时按 20 条分页读取可见评论，并通过 `Prefer: count=exact` 获取 RLS 可见评论总数 |
 | `comments` | `POST /comments` | 登录用户评论；允许文字、表情和最多 4 张图片路径 |
 | `posts/comments` | `POST /functions/v1/delete-content` | 作者删除自己的动态或评论；先隐藏，再清理图片和数据库记录 |
 | `post_likes` | `POST /post_likes` | 当前用户点赞；`(post_id,user_id)` 唯一 |

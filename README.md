@@ -15,7 +15,7 @@ npm run dev
 
 ## 启用社区
 
-1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 中的迁移。已执行旧迁移的项目只补执行尚未应用的迁移，包括 `20261108125637_add_report_review_reason.sql`、`20261108132208_random_profile_names_password_status.sql` 和 `20261108141538_fix_legacy_admin_rpc_and_default_names.sql`。
+1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 中的迁移。已执行旧迁移的项目只补执行尚未应用的迁移，包括 `20261108125637_add_report_review_reason.sql`、`20261108132208_random_profile_names_password_status.sql`、`20261108141538_fix_legacy_admin_rpc_and_default_names.sql` 和 `20261115083124_community_engagement_summary.sql`。
 2. 复制 `.env.example` 为 `.env.local`，填入 Project URL 和 anon/publishable key。
 3. 部署 Edge Functions：`admin-moderate`、`admin-manage`、`delete-account` 与 `delete-content`。PowerShell 请在项目目录使用 `npx.cmd`（避免执行策略拦截 `npx.ps1`）：依次执行 `npx.cmd supabase login`、`npx.cmd supabase link --project-ref obyqyzgycivgituobdzm`，再对四个函数分别执行 `npx.cmd supabase functions deploy <function-name> --use-api`。本配置已启用 JWT 校验；`--use-api` 部署不需要本地 Docker。
 4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs，加入后台地址 `https://admin.yeecc.cn/`。在 Authentication → SMTP Settings 配置 Resend SMTP：`smtp.resend.com:465`、用户名 `resend`、发件人 `no-reply@yeecc.cn`，密码使用 Resend API key。然后运行 `npx.cmd supabase config push --yes` 推送 6 位、10 分钟验证码设置和邮件模板；SMTP 密码由 Auth SMTP 设置保管，不提交到 Git。
@@ -50,7 +50,7 @@ npm run preview
 
 根目录 `wrangler.toml` 配置了 `daily.yeecc.cn` 与 `admin.yeecc.cn` 两个生产自定义域名，以及 `dist` 单页应用资源。
 
-连接 Cloudflare Workers Builds 后，生产分支设为 `main`、根目录设为 `/`，构建命令使用 `npm run build`，部署命令使用 `npx wrangler deploy`。Cloudflare 首次连接仓库时需要安装 GitHub App 并授权读取 `Yee-2/RiChangYouXu`；完成后推送 `main` 会发布两个域名共用的新前端。
+连接 Cloudflare Workers Builds 后，生产分支设为 `main`、根目录设为 `/`，构建命令使用 `npm run build`，部署命令使用 `npx wrangler deploy`。Cloudflare 首次连接仓库时需要安装 GitHub App 并授权读取 `Yee-2/RiChangYouXu`；完成后推送 `main` 会发布两个域名共用的新前端。社区新前端依赖 `get_post_engagement` RPC；发布前先在 Supabase 应用对应迁移，再将前端变更合入或推送到生产分支。
 
 手动发布时，在项目目录完成 `npx wrangler login`，然后执行 `npm run build` 和 `npx wrangler deploy`。
 
