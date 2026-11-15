@@ -708,10 +708,15 @@ export function LogoutAccountPage({ onMessage, onComplete }: { onMessage: (messa
   const logout = async () => {
     if (!supabase || busy) return;
     setBusy(true);
-    const { error } = await supabase.auth.signOut();
-    setBusy(false);
-    if (error) { onMessage(error.message); return; }
-    onMessage('已退出登录'); onComplete();
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      onMessage(error ? '已退出本设备，但服务器端的会话撤销未确认。' : '已退出登录');
+      onComplete();
+    } catch (cause) {
+      onMessage(toChineseUserMessage(cause, '退出登录失败，请稍后重试。'));
+    } finally {
+      setBusy(false);
+    }
   };
   return <section className="surface-card settings-form-card"><div className="settings-form-heading"><span className="eyebrow">SIGN OUT</span><h2>退出登录</h2><p>退出后，仍可继续使用本机的生活清单、记录和备份。</p></div><div className="logout-confirm-card"><span className="settings-icon"><Icon name="logout" /></span><b>确认退出当前账号？</b><p>再次登录即可恢复社区功能。</p></div><button className="primary-button auth-submit" type="button" disabled={busy} onClick={() => void logout()}>{busy ? '正在退出…' : '确认退出登录'}</button></section>;
 }

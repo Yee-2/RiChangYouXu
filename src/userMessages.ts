@@ -8,10 +8,10 @@ export function toChineseUserMessage(value: unknown, fallback = '操作失败，
 
   if (!normalized) return fallback;
   if (/load failed|failed to fetch|networkerror|network request failed|fetch failed|network is unreachable|err_name_not_resolved|err_connection_(?:reset|refused)|timed? ?out|timeout|aborterror/.test(normalized)) {
-    return '连接验证码服务失败，请检查网络后重试；如果持续出现，请联系管理员检查服务状态。';
+    return '网络连接失败，请检查网络后重试；如果持续出现，请联系管理员检查服务状态。';
   }
   if (/cors|cross-origin|access-control-allow-origin/.test(normalized)) {
-    return '浏览器未能连接验证码服务，请稍后重试；如果持续出现，请联系管理员检查站点跨域配置。';
+    return '浏览器未能连接服务，请稍后重试；如果持续出现，请联系管理员检查站点跨域配置。';
   }
   if (/over_email_send_rate_limit|email rate limit|rate limit exceeded|too many requests|too many.*email|for security purposes/.test(normalized)) {
     return '请求过于频繁，请稍后再试。';

@@ -33,9 +33,15 @@ export default function AdminPortal() {
   }, []);
 
   const signOut = async () => {
-    if (supabase) await supabase.auth.signOut();
-    setSession(null);
-    setMode('login');
+    if (!supabase) { setSession(null); setMode('login'); return; }
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      setSession(null);
+      setMode('login');
+      if (error) setNotice('已退出本设备，但服务器端的会话撤销未确认。');
+    } catch (cause) {
+      setNotice(toChineseUserMessage(cause, '退出登录失败，请稍后重试。'));
+    }
   };
 
   const rejectNonAdmin = async () => {
