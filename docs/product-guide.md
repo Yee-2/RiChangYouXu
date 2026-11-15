@@ -123,7 +123,7 @@ npm run build
 npx.cmd wrangler@4 deploy
 ```
 
-如果不使用 Cloudflare，可将 `dist/` 部署到支持 SPA fallback 的 HTTPS 静态托管，并配置相同的 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY` 构建变量。推送到 `main` 不会自动发布前端，除非已连接 Cloudflare Workers Builds；使用 Workers Builds 时，生产分支设为 `main`，构建命令为 `npm run build`，部署命令为 `npx wrangler deploy`。社区新前端依赖 `get_post_engagement` RPC；发布前先应用 `20261115083124_community_engagement_summary.sql`，再部署前端。
+如果不使用 Cloudflare，可将 `dist/` 部署到支持 SPA fallback 的 HTTPS 静态托管，并配置相同的 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY` 构建变量。推送到 `main` 不会自动发布前端，除非已连接 Cloudflare Workers Builds；使用 Workers Builds 时，生产分支设为 `main`，构建命令为 `npm run build`，部署命令为 `npx wrangler deploy`。社区新前端依赖 `get_post_engagement` RPC；发布前先应用 `20261115090418_community_engagement_summary.sql`，再部署前端。
 
 ## 部署检查
 
