@@ -150,7 +150,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     setMetrics({ openReports: openCountResult.count ?? 0, hiddenContent: (hiddenPostsResult.count ?? 0) + (hiddenCommentsResult.count ?? 0), restrictedAccounts: restrictedCountResult.count ?? 0, handledToday: handledTodayResult.count ?? 0 });
     const nextReports = (reportResult.data ?? []) as Report[];
     const reportsWithUids = await attachReporterUids(nextReports);
-    if (!firstError && reportsWithUids.error) setError(`举报人 UID 读取失败：${reportsWithUids.error}`);
+    if (!firstError && reportsWithUids.error) setError(toChineseUserMessage(reportsWithUids.error, '举报人 UID 读取失败，请稍后重试。'));
     setReports(reportsWithUids.rows);
     const nextProfiles = (profileResult.data ?? []) as AdminProfile[];
     const nextAccounts = ((adminResult.data as { admins?: AdminProfile[] } | null)?.admins ?? []);
@@ -165,7 +165,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     ]);
     if (!firstError) {
       const avatarError = profilesWithAvatars.error ?? accountsWithAvatars.error ?? usersWithAvatars.error;
-      if (avatarError) setError(`头像暂时无法加载：${avatarError}`);
+      if (avatarError) setError(toChineseUserMessage(avatarError, '头像暂时无法加载，请稍后重试。'));
     }
     setProfiles(profilesWithAvatars.rows);
     setAccounts(accountsWithAvatars.rows);
@@ -198,7 +198,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       ? ((data as { users?: AdminProfile[] } | null)?.users ?? [])
       : ((data as { admins?: AdminProfile[] } | null)?.admins ?? []);
     const avatarResult = await attachAvatarUrls(rows);
-    if (avatarResult.error) setError(`头像暂时无法加载：${avatarResult.error}`);
+    if (avatarResult.error) setError(toChineseUserMessage(avatarResult.error, '头像暂时无法加载，请稍后重试。'));
     if (role === 'user') {
       setUsers(avatarResult.rows); setOffsets((current) => ({ ...current, users: rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 }));
     } else {
@@ -213,7 +213,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
     if (section === 'reports') {
       const start = offsets.reports; const { data, error: queryError } = await supabase.from('reports').select('*').order('status', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false }).range(start, start + 99);
       if (queryError) setError(queryError.message);
-      const rows = (data ?? []) as Report[]; const enriched = await attachReporterUids(rows); if (enriched.error) setError(`举报人 UID 读取失败：${enriched.error}`); setReports((current) => [...current, ...enriched.rows]); setOffsets((current) => ({ ...current, reports: start + rows.length })); setHasMore((current) => ({ ...current, reports: rows.length === 100 }));
+      const rows = (data ?? []) as Report[]; const enriched = await attachReporterUids(rows); if (enriched.error) setError(toChineseUserMessage(enriched.error, '举报人 UID 读取失败，请稍后重试。')); setReports((current) => [...current, ...enriched.rows]); setOffsets((current) => ({ ...current, reports: start + rows.length })); setHasMore((current) => ({ ...current, reports: rows.length === 100 }));
     } else if (section === 'users' || section === 'admins') {
       const role = section === 'users' ? 'user' : 'admin';
       const pageKey = role === 'user' ? 'users' : 'admins';
@@ -224,7 +224,7 @@ export default function AdminPanel({ session, onExit, onDenied }: { session: Ses
       const result = data as { users?: AdminProfile[]; admins?: AdminProfile[] } | null;
       const rows = role === 'user' ? (result?.users ?? []) : (result?.admins ?? []);
       const avatarResult = await attachAvatarUrls(rows);
-      if (avatarResult.error) setError(`头像暂时无法加载：${avatarResult.error}`);
+      if (avatarResult.error) setError(toChineseUserMessage(avatarResult.error, '头像暂时无法加载，请稍后重试。'));
       if (role === 'user') { setUsers((current) => [...current, ...avatarResult.rows]); setOffsets((current) => ({ ...current, users: start + rows.length })); setHasMore((current) => ({ ...current, users: rows.length === 100 })); }
       else { setAccounts((current) => [...current, ...avatarResult.rows]); setOffsets((current) => ({ ...current, admins: start + rows.length })); setHasMore((current) => ({ ...current, admins: rows.length === 100 })); }
     } else if (section === 'audit') {
@@ -478,7 +478,7 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
         let allMediaReadable = true;
         if (latestItem.image_paths.length) {
           const { data: signed, error: imageError } = await supabase.storage.from('community-media').createSignedUrls(latestItem.image_paths, 1800);
-          if (imageError) { setDetailError(`部分图片暂时无法读取：${imageError.message}`); allMediaReadable = false; }
+          if (imageError) { setDetailError(toChineseUserMessage(imageError, '部分图片暂时无法读取，请刷新后重试。')); allMediaReadable = false; }
           else {
             nextImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
             if (nextImages.length !== latestItem.image_paths.length) { setDetailError('部分图片暂时无法读取，请刷新后重试。'); allMediaReadable = false; }
@@ -494,7 +494,7 @@ function ContentDetailDialog({ item, onClose, onPerform }: { item: ContentRow; o
             nextParentPost = { ...parent, target_type: 'post' } as ContentRow;
             if (nextParentPost.image_paths.length) {
               const { data: signed, error: parentImageError } = await supabase.storage.from('community-media').createSignedUrls(nextParentPost.image_paths, 1800);
-              if (parentImageError) { setDetailError(`关联动态图片暂时无法读取：${parentImageError.message}`); allMediaReadable = false; }
+              if (parentImageError) { setDetailError(toChineseUserMessage(parentImageError, '关联动态图片暂时无法读取，请刷新后重试。')); allMediaReadable = false; }
               else {
                 nextParentImages = (signed ?? []).map((file) => file.signedUrl ?? '').filter(Boolean);
                 if (nextParentImages.length !== nextParentPost.image_paths.length) { setDetailError('关联动态的部分图片暂时无法读取，请刷新后重试。'); allMediaReadable = false; }
@@ -597,7 +597,7 @@ function AccountDesk({ mode, profiles, search, setSearch, onSearch, statusFilter
       if (account) {
         const avatarResult = await attachAvatarUrls([account]);
         setCandidate(avatarResult.rows[0] ?? account);
-        if (avatarResult.error) onMessage(`头像暂时无法加载：${avatarResult.error}`);
+        if (avatarResult.error) onMessage(toChineseUserMessage(avatarResult.error, '头像暂时无法加载，请稍后重试。'));
       } else setCandidate(null);
     }
     setLookupBusy(false);
