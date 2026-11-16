@@ -153,7 +153,9 @@ function LifeApp() {
 
   const renameChecklist = async (checklist: Checklist) => {
     const title = window.prompt('修改清单名称', checklist.title)?.trim();
-    if (title) await persist('checklists', { ...checklist, title }, '清单名称已更新');
+    if (!title) return;
+    if (title.length > 60) { setToast('清单名称不能超过 60 个字。'); return; }
+    await persist('checklists', { ...checklist, title }, '清单名称已更新');
   };
 
   const toggleChecklistArchive = async (checklist: Checklist) => {
@@ -201,6 +203,7 @@ function LifeApp() {
   const editTemplate = async (template: CheckTemplate) => {
     const title = window.prompt('修改模板名称', template.title)?.trim();
     if (!title) return;
+    if (title.length > 60) { setToast('模板名称不能超过 60 个字。'); return; }
     const raw = window.prompt('检查项目（用逗号分隔）', template.items.join('，'));
     if (raw === null) return;
     const nextItems = raw.split(/[，,\n]/).map((item) => item.trim()).filter(Boolean);
@@ -209,8 +212,10 @@ function LifeApp() {
   };
 
   const copyTemplate = async (template: CheckTemplate) => {
-    const title = window.prompt('副本名称', `${template.title}（副本）`)?.trim();
+    const defaultCopyTitle = `${template.title.slice(0, 56)}（副本）`;
+    const title = window.prompt('副本名称', defaultCopyTitle)?.trim();
     if (!title) return;
+    if (title.length > 60) { setToast('模板名称不能超过 60 个字。'); return; }
     await persist('checkTemplates', { ...template, id: id(), title, createdAt: new Date().toISOString() }, '模板副本已创建');
   };
 
@@ -222,30 +227,32 @@ function LifeApp() {
   const createMeter = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get('name') ?? '').trim(); const kind = String(form.get('kind') ?? 'water') as Meter['kind'];
     if (!name) return;
-    const meter: Meter = { id: id(), name, kind, unit: String(form.get('unit') ?? (kind === 'electricity' ? '度' : 'm³')), createdAt: new Date().toISOString() };
+    const unit = String(form.get('unit') ?? '').trim() || (kind === 'electricity' ? '度' : 'm³');
+    const meter: Meter = { id: id(), name, kind, unit, createdAt: new Date().toISOString() };
     await persist('meters', meter, '表具已添加'); setModal(null);
   };
 
   const createReading = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget); const meterId = String(form.get('meterId') ?? ''); const value = Number(form.get('value')); const date = String(form.get('date') ?? today());
+    event.preventDefault(); const form = new FormData(event.currentTarget); const meterId = String(form.get('meterId') ?? ''); const value = Number(form.get('value')); const date = String(form.get('date') ?? '').trim() || today();
     if (!meterId || !Number.isFinite(value) || value < 0) { setToast('请输入有效的非负读数。'); return; }
     const previous = data.meterReadings.filter((entry) => entry.meterId === meterId).sort((a, b) => b.date.localeCompare(a.date))[0];
     if (previous && (date <= previous.date || value < previous.value)) { setToast('日期必须晚于上次抄表，读数不能小于上次记录。'); return; }
-    const reading: MeterReading = { id: id(), meterId, value, date, note: String(form.get('note') ?? '') || undefined, createdAt: new Date().toISOString() };
+    const reading: MeterReading = { id: id(), meterId, value, date, note: String(form.get('note') ?? '').trim() || undefined, createdAt: new Date().toISOString() };
     await persist('meterReadings', reading, '抄表记录已保存'); setModal(null);
   };
 
   const createPet = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get('name') ?? '').trim();
     if (!name) return;
-    const pet: Pet = { id: id(), name, kind: String(form.get('kind') ?? '宠物'), birthday: String(form.get('birthday') ?? '') || undefined, note: String(form.get('note') ?? '') || undefined, createdAt: new Date().toISOString() };
+    const kind = String(form.get('kind') ?? '').trim() || '猫咪';
+    const pet: Pet = { id: id(), name, kind, birthday: String(form.get('birthday') ?? '').trim() || undefined, note: String(form.get('note') ?? '').trim() || undefined, createdAt: new Date().toISOString() };
     await persist('pets', pet, '宠物档案已创建'); setModal(null);
   };
 
   const createPetEvent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form = new FormData(event.currentTarget); const title = String(form.get('title') ?? '').trim(); const petId = String(form.get('petId') ?? '');
     if (!title || !petId) return;
-    const petEvent: PetEvent = { id: id(), petId, kind: String(form.get('kind') ?? 'custom') as PetEventKind, title, date: String(form.get('date') ?? today()), reminderDate: String(form.get('reminderDate') ?? '') || undefined, note: String(form.get('note') ?? '') || undefined, completed: false, createdAt: new Date().toISOString() };
+    const petEvent: PetEvent = { id: id(), petId, kind: String(form.get('kind') ?? 'custom') as PetEventKind, title, date: String(form.get('date') ?? '').trim() || today(), reminderDate: String(form.get('reminderDate') ?? '').trim() || undefined, note: String(form.get('note') ?? '').trim() || undefined, completed: false, createdAt: new Date().toISOString() };
     await persist('petEvents', petEvent, '宠物记录已保存'); setModal(null);
   };
 
@@ -304,11 +311,11 @@ function LifeApp() {
       {nav === 'home' && <HomePage lists={data.checklists} items={data.checklistItems} runs={data.checkRuns} templates={data.checkTemplates} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={activePetReminders} onGo={setNav} onStartRun={startRun} onToggleRun={toggleRunItem} onAddReading={() => setModal('reading')} />}
       {nav === 'lists' && <ListsPage lists={data.checklists} listItems={data.checklistItems} templates={data.checkTemplates} runs={data.checkRuns} selected={selectedChecklist} setSelected={setSelectedChecklist} onNewList={() => setModal('checklist')} onNewItem={(listId) => { setSelectedChecklist(listId); setModal('item'); }} onToggleItem={toggleItem} onNewTemplate={() => setModal('template')} onStartRun={startRun} onToggleRun={toggleRunItem} onExample={createExampleChecklist} onRename={renameChecklist} onArchive={toggleChecklistArchive} onDelete={deleteChecklist} onEditTemplate={editTemplate} onCopyTemplate={copyTemplate} onDeleteTemplate={deleteTemplate} />}
       {nav === 'records' && <RecordsPage tab={recordTab} setTab={setRecordTab} meters={data.meters} readings={data.meterReadings} pets={data.pets} events={data.petEvents} onAddMeter={() => setModal('meter')} onAddReading={() => setModal('reading')} onAddPet={() => setModal('pet')} onAddPetEvent={() => setModal('pet-event')} onToggleEvent={markPetEvent} />}
-      {nav === 'community' && <Suspense fallback={<div className="feed-loading"><Icon name="progress_activity" className="spin" />正在打开生活社区…</div>}><Community session={session} onOpenMy={() => { setProfileView('home'); setNav('profile'); }} initialProfileId={communityProfileId} onExitUserProfile={() => { setCommunityProfileId(null); setNav('profile'); }} /></Suspense>}
+      {nav === 'community' && <Suspense fallback={<div className="feed-loading"><Icon name="progress_activity" className="spin" />正在打开生活社区…</div>}><Community session={session} onOpenMy={() => { setCommunityProfileId(null); setProfileView('home'); setNav('profile'); }} initialProfileId={communityProfileId} onClearInitialProfile={() => setCommunityProfileId(null)} onExitUserProfile={() => { setCommunityProfileId(null); setNav('profile'); }} /></Suspense>}
       {nav === 'profile' && <ProfilePage session={session} view={profileView} setView={setProfileView} onMessage={setToast} onTheme={handleTheme} onExport={exportBackup} onImport={() => setModal('import')} onClear={clearData} onOpenCommunityProfile={(userId) => { setCommunityProfileId(userId); setNav('community'); }} />}
     </main>
     <nav className="bottom-nav" aria-label="主导航">
-      {navItems.map((item) => <button key={item.key} className={`nav-button ${nav === item.key ? 'active' : ''}`} onClick={() => setNav(item.key)} aria-current={nav === item.key ? 'page' : undefined}>
+      {navItems.map((item) => <button key={item.key} className={`nav-button ${nav === item.key ? 'active' : ''}`} onClick={() => { setCommunityProfileId(null); setNav(item.key); }} aria-current={nav === item.key ? 'page' : undefined}>
         <span className="nav-icon-wrap"><Icon name={iconNames[item.key]} size={22} /></span><span>{item.label}</span>
       </button>)}
     </nav>
@@ -393,6 +400,7 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
 
   useEffect(() => {
     if (!session) { setAccountProfile(null); setFollowingCount(0); setPostCount(0); return; }
+    if (view !== 'home') return;
     let active = true;
     void (async () => {
       const { supabase } = await import('./supabase');
@@ -412,7 +420,7 @@ function ProfilePage({ session, view, setView, onMessage, onTheme, onExport, onI
       if (active) { setAccountProfile(value); setFollowingCount(followingResult.count ?? 0); setPostCount(postResult.count ?? 0); }
     })().catch((cause) => { if (active) onMessage(cause instanceof Error ? cause.message : '账号资料加载失败。'); });
     return () => { active = false; };
-  }, [session?.user.id, onMessage]);
+  }, [session?.user.id, view, onMessage]);
 
   useEffect(() => {
     if (['account', 'edit-profile', 'following', 'posts', 'delete-account', 'logout'].includes(view) && !session) setView('home');

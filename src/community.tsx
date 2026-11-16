@@ -13,7 +13,7 @@ type CommentItem = { id: string; post_id: string; author_id: string; body: strin
 type Report = { id: string; reporter_id: string; target_type: 'post' | 'comment' | 'user'; target_id: string; reason: string; detail: string; status: string; review_reason?: string | null; created_at: string };
 const COMMUNITY_PAGE_SIZE = 20;
 
-export default function Community({ session, onOpenMy, initialProfileId, onExitUserProfile }: { session: Session | null; onOpenMy?: () => void; initialProfileId?: string | null; onExitUserProfile?: () => void }) {
+export default function Community({ session, onOpenMy, initialProfileId, onClearInitialProfile, onExitUserProfile }: { session: Session | null; onOpenMy?: () => void; initialProfileId?: string | null; onClearInitialProfile?: () => void; onExitUserProfile?: () => void }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const postsRequestId = useRef(0);
@@ -183,20 +183,21 @@ export default function Community({ session, onOpenMy, initialProfileId, onExitU
   if (!session && showAuthPage) return <AuthPage onBack={() => setShowAuthPage(false)} />;
   if (!session) return <CommunityWelcome onLogin={() => setShowAuthPage(true)} />;
 
-  const openUserProfile = (userId: string) => { setSelectedUserId(userId); setSelectedTopic(null); setReturnToPersonalPage(false); };
+  const openUserProfile = (userId: string) => { onClearInitialProfile?.(); setSelectedUserId(userId); setSelectedTopic(null); setReturnToPersonalPage(false); };
+  const openTopic = (topic: Topic) => { onClearInitialProfile?.(); setSelectedTopic(topic); setSelectedUserId(null); setReturnToPersonalPage(false); };
   const closeUserProfile = () => {
     if (returnToPersonalPage && onExitUserProfile) onExitUserProfile();
-    else setSelectedUserId(null);
+    else { onClearInitialProfile?.(); setSelectedUserId(null); }
   };
-  if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={closeUserProfile}><Icon name="arrow_back" />{returnToPersonalPage ? '返回我的' : '返回社区'}</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{toChineseUserMessage(error)}<button type="button" onClick={() => void loadPosts()}>重试</button></div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? <>{posts.map((post) => <PostCard key={`${session?.user.id ?? 'anonymous'}:${post.id}`} post={post} session={session} profile={profile} onRefresh={refreshLoadedPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />)}{loadMoreControls}</> : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
+  if (selectedUserId) return <div className="community-page"><button className="soft-button profile-back" onClick={closeUserProfile}><Icon name="arrow_back" />{returnToPersonalPage ? '返回我的' : '返回社区'}</button><PublicProfileHeader userId={selectedUserId} session={session} ownId={session?.user.id} onError={setError} onOpenMy={onOpenMy} />{error && <div className="community-alert" role="alert">{toChineseUserMessage(error)}<button type="button" onClick={() => void loadPosts()}>重试</button></div>}<div className="feed-main profile-feed">{loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载动态…</div> : posts.length ? <>{posts.map((post) => <PostCard key={`${session?.user.id ?? 'anonymous'}:${post.id}`} post={post} session={session} profile={profile} onRefresh={refreshLoadedPosts} onError={setError} onTopic={openTopic} onOpenProfile={openUserProfile} />)}{loadMoreControls}</> : <div className="feed-empty"><Icon name="article" /><h3>还没有公开动态</h3><p>这个主页发布的动态会显示在这里。</p></div>}</div></div>;
   return <div className="community-page">
     <div className="community-title"><div><p className="eyebrow">SHARE A LITTLE JOY</p><h1>生活社区</h1><p>记录生活的小事，也看看别人的可爱日常。</p></div>{profile?.role === 'admin' && profile.account_status === 'active' && <a className="soft-button admin-entry" href={import.meta.env.DEV ? `${window.location.origin}/#/admin` : 'https://admin.yeecc.cn/'}><Icon name="admin_panel_settings" />管理后台</a>}</div>
     {session && profile && effectiveProfileStatus(profile) !== 'active' && <div className="community-alert">账号当前状态：{profile.account_status === 'suspended' ? `暂停中${profile.suspension_expires_at ? `，预计 ${new Date(profile.suspension_expires_at).toLocaleString('zh-CN')} 恢复` : ''}` : profile.account_status === 'banned' ? '永久封禁，社区发布和互动已关闭。' : '已注销'}。{profile.account_status !== 'deleted' && '如需了解处理原因，请联系管理员。'}</div>}
-    <div className="community-feed-layout"><aside className="topic-rail"><h3>热门话题</h3><p className={!selectedTopic ? 'topic-link selected' : 'topic-link'} onClick={() => setSelectedTopic(null)}>全部动态</p>{['宠物日记','生活碎片','今日好心情','养宠新手','居家日常'].map((title) => <TopicShortcut key={title} title={title} active={selectedTopic?.title === title} onClick={(topic) => setSelectedTopic(topic)} />)}<div className="small-note">动态支持图片、表情、话题和评论。</div></aside><div className="feed-main">
+    <div className="community-feed-layout"><aside className="topic-rail"><h3>热门话题</h3><p className={!selectedTopic ? 'topic-link selected' : 'topic-link'} onClick={() => setSelectedTopic(null)}>全部动态</p>{['宠物日记','生活碎片','今日好心情','养宠新手','居家日常'].map((title) => <TopicShortcut key={title} title={title} active={selectedTopic?.title === title} onClick={openTopic} />)}<div className="small-note">动态支持图片、表情、话题和评论。</div></aside><div className="feed-main">
       {session && profile && effectiveProfileStatus(profile) === 'active' && <Composer userId={session.user.id} onPosted={refreshLoadedPosts} onError={setError} />}
       {selectedTopic && <div className="topic-heading"><div><small>正在浏览话题</small><h2>#{selectedTopic.title}</h2></div><button className="icon-button" onClick={() => setSelectedTopic(null)} aria-label="清除话题筛选"><Icon name="close" /></button></div>}
       {error && <div className="community-alert" role="alert">{toChineseUserMessage(error)}<button onClick={() => void loadPosts()}>重试</button></div>}
-      {loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载新鲜动态…</div> : posts.length ? <>{posts.map((post) => <PostCard key={`${session?.user.id ?? 'anonymous'}:${post.id}`} post={post} session={session} profile={profile} onRefresh={refreshLoadedPosts} onError={setError} onTopic={setSelectedTopic} onOpenProfile={openUserProfile} />)}{loadMoreControls}</> : <div className="feed-empty"><Icon name="auto_awesome" /><h3>{selectedTopic ? '这个话题还没有动态' : '这里还很安静'}</h3><p>来分享一件今天的小事吧。</p></div>}
+      {loading ? <div className="feed-loading"><Icon name="progress_activity" />正在加载新鲜动态…</div> : posts.length ? <>{posts.map((post) => <PostCard key={`${session?.user.id ?? 'anonymous'}:${post.id}`} post={post} session={session} profile={profile} onRefresh={refreshLoadedPosts} onError={setError} onTopic={openTopic} onOpenProfile={openUserProfile} />)}{loadMoreControls}</> : <div className="feed-empty"><Icon name="auto_awesome" /><h3>{selectedTopic ? '这个话题还没有动态' : '这里还很安静'}</h3><p>来分享一件今天的小事吧。</p></div>}
     </div></div>
   </div>;
 }
@@ -787,11 +788,12 @@ function PostCard({ post, session, profile, onRefresh, onError, onTopic, onOpenP
       const authors = [...new Set(rows.map((item) => item.author_id))];
       const profiles = authors.length ? await supabase.from('profiles').select('id,display_name,avatar_path').in('id', authors) : { data: [], error: null };
       if (profiles.error) throw profiles.error;
-      const people = new Map(((profiles.data ?? []) as Array<Pick<Profile, 'id' | 'display_name' | 'avatar_path'>>).map((item) => [item.id, item]));
+      const people = new Map(((profiles.data ?? []) as Array<Pick<Profile, 'id' | 'display_name' | 'avatar_path' | 'avatar_url'>>).map((item) => [item.id, item]));
       const paths = [...new Set([...rows.flatMap((item) => item.image_paths), ...[...people.values()].map((item) => item.avatar_path).filter((path): path is string => Boolean(path))])];
       const signed = paths.length ? await supabase.storage.from('community-media').createSignedUrls(paths, 3600) : { data: [], error: null };
       if (signed.error) throw signed.error;
       const urls = new Map((signed.data ?? []).map((file) => [file.path ?? '', file.signedUrl ?? '']));
+      for (const person of people.values()) if (person.avatar_path) person.avatar_url = urls.get(person.avatar_path);
       const decorated = rows.map((item) => ({ ...item, profile: people.get(item.author_id) as Profile | undefined, images: item.image_paths.map((path) => urls.get(path) ?? '').filter(Boolean) }));
       if (requestId !== commentRequestId.current) return;
       setComments((current) => {

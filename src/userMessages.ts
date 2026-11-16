@@ -40,6 +40,108 @@ export function toChineseUserMessage(value: unknown, fallback = '操作失败，
   if (/password.*(weak|short|least)|weak_password/.test(normalized)) {
     return '密码强度不足，请按页面要求设置密码。';
   }
+  if (/admin_account_cannot_self_delete/.test(normalized)) {
+    return '管理员账号不能直接注销，请先撤销管理员权限。';
+  }
+  if (/confirmation_required/.test(normalized)) {
+    return '请输入正确的确认内容后再提交。';
+  }
+  if (/account_not_active/.test(normalized)) {
+    return '当前账号处于受限状态，暂不能执行此操作。';
+  }
+  if (/target_not_owned/.test(normalized)) {
+    return '只能操作自己发布的内容。';
+  }
+  if (/profile_not_found/.test(normalized)) {
+    return '找不到账号资料，请重新登录后重试。';
+  }
+  if (/media_cleanup_failed|media_list_failed/.test(normalized)) {
+    return '图片清理未完全成功，内容已先隐藏，请稍后重试。';
+  }
+  if (/content_delete_failed/.test(normalized)) {
+    return '内容删除失败，请稍后重试。';
+  }
+  if (/content_already_removed/.test(normalized)) {
+    return '该内容已被移除，无法再次操作。';
+  }
+  if (/target_not_manageable/.test(normalized)) {
+    return '不能对管理员账号或不存在的账号执行此操作。';
+  }
+  if (/permanently_banned_accounts_require_(?:manual_)?unban/.test(normalized)) {
+    return '永久封禁账号需通过“手动解封”恢复。';
+  }
+  if (/target_is_not_banned/.test(normalized)) {
+    return '该账号当前未处于永久封禁状态。';
+  }
+  if (/invalid_suspension_duration/.test(normalized)) {
+    return '请选择有效的暂停时长（24 小时、7 天或 30 天）。';
+  }
+  if (/report_id_required|report_not_found/.test(normalized)) {
+    return '找不到对应的举报记录。';
+  }
+  if (/action_applied_audit_failed/.test(normalized)) {
+    return '操作已生效，但写入审计记录失败，请检查操作记录。';
+  }
+  if (/action_applied_report_update_failed/.test(normalized)) {
+    return '操作已生效，但更新举报状态失败，请刷新后核查。';
+  }
+  if (/auth_ban_failed_and_rollback_failed/.test(normalized)) {
+    return '账号限制同步失败且回滚未完成，请立即刷新核查账号状态。';
+  }
+  if (/password_updated_audit_(?:outcome_)?failed/.test(normalized)) {
+    return '密码已更新，但审计记录写入失败，请检查后台操作记录。';
+  }
+  if (/password_update_failed_audit_outcome_failed/.test(normalized)) {
+    return '密码更新失败，且审计记录更新失败，请检查后台操作记录。';
+  }
+  if (/password_reset_audit_intent_failed/.test(normalized)) {
+    return '无法写入密码重置审计记录，操作已取消。';
+  }
+  if (/password_update_failed/.test(normalized)) {
+    return '密码更新失败，请检查新密码是否符合要求。';
+  }
+  if (/already_admin/.test(normalized)) {
+    return '该账号已经是管理员。';
+  }
+  if (/target_not_eligible/.test(normalized)) {
+    return '只有邮箱已验证且状态正常的账号可以成为管理员。';
+  }
+  if (/target_not_admin/.test(normalized)) {
+    return '该账号当前不是管理员。';
+  }
+  if (/last_active_admin/.test(normalized)) {
+    return '不能撤销最后一位有效管理员的权限。';
+  }
+  if (/target_not_found|account_not_found/.test(normalized)) {
+    return '找不到目标对象或账号。';
+  }
+  if (/lookup_required/.test(normalized)) {
+    return '请输入 6 位 UID 或邮箱。';
+  }
+  if (/invalid_reason/.test(normalized)) {
+    return '请填写有效的操作原因。';
+  }
+  if (/post_not_editable/.test(normalized)) {
+    return '这条动态当前无法编辑。';
+  }
+  if (/post_has_content|comment_has_content/.test(normalized)) {
+    return '内容不能为空，请填写文字或保留图片。';
+  }
+  if (/post_body_limit/.test(normalized)) {
+    return '动态正文不能超过 5000 字。';
+  }
+  if (/comment_body_limit/.test(normalized)) {
+    return '评论内容不能超过 2000 字。';
+  }
+  if (/origin_not_allowed/.test(normalized)) {
+    return '当前访问来源未被允许调用后台管理接口。';
+  }
+  if (/\bunauthorized\b/.test(normalized)) {
+    return '登录状态已失效，请重新登录。';
+  }
+  if (/\bforbidden\b|42501|row-level security/.test(normalized)) {
+    return '当前账号没有执行此操作的权限。';
+  }
   if (hasChinese.test(message)) return message;
   return fallback;
 }
