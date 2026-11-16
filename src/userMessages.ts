@@ -1,4 +1,14 @@
 const hasChinese = /\p{Script=Han}/u;
+const errorHintPattern = /失败|错误|不正确|无效|过期|不能|不可|不足|不一致|不完整|不支持|未连接|无法|未确认|未验证|尚未|频繁|不允许|暂不|找不到|不存在|已注册|受限|已被移除|至少|不超过|必须|请先|请输入|请选择|请检查|请更换|请联系/;
+
+export function isErrorUserMessage(value: unknown): boolean {
+  const error = value && typeof value === 'object' ? value as { message?: unknown; code?: unknown } : undefined;
+  const raw = typeof value === 'string' ? value.trim() : typeof error?.message === 'string' ? error.message.trim() : '';
+  if (!raw) return false;
+  if (!hasChinese.test(raw)) return true;
+  const translated = toChineseUserMessage(raw);
+  return errorHintPattern.test(raw) || errorHintPattern.test(translated);
+}
 
 export function toChineseUserMessage(value: unknown, fallback = '操作失败，请稍后重试。'): string {
   const error = value && typeof value === 'object' ? value as { message?: unknown; code?: unknown } : undefined;

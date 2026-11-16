@@ -4,7 +4,7 @@ import * as db from './db';
 import type { BackupPreview } from './db';
 import type { Profile as CommunityProfile } from './community';
 import { Icon } from './Icon';
-import { toChineseUserMessage } from './userMessages';
+import { isErrorUserMessage, toChineseUserMessage } from './userMessages';
 import type { CheckRun, CheckTemplate, Checklist, ChecklistItem, LocalDatabase, Meter, MeterReading, NavKey, Pet, PetEvent, PetEventKind, StoreName, ThemeChoice } from './types';
 
 type DataState = { [K in StoreName]: LocalDatabase[K][] };
@@ -319,7 +319,7 @@ function LifeApp() {
         <span className="nav-icon-wrap"><Icon name={iconNames[item.key]} size={22} /></span><span>{item.label}</span>
       </button>)}
     </nav>
-    {toast && <div className="toast" role="status"><Icon name="check_circle" size={18} />{toChineseUserMessage(toast)}</div>}
+    {toast && (() => { const isError = isErrorUserMessage(toast); return <div className={`toast${isError ? ' toast-error' : ''}`} role={isError ? 'alert' : 'status'}><Icon name={isError ? 'error' : 'check_circle'} size={18} />{toChineseUserMessage(toast)}</div>; })()}
     {modal === 'checklist' && <Modal title="新建生活清单" onClose={() => setModal(null)}><form onSubmit={createChecklist} className="form-stack"><Field label="清单名称"><input autoFocus name="title" placeholder="例如：周末短途旅行" required maxLength={60} /></Field><button className="primary-button">创建清单</button></form></Modal>}
     {modal === 'item' && <Modal title="添加待办事项" onClose={() => setModal(null)}><form onSubmit={createChecklistItem} className="form-stack"><Field label="事项名称"><input autoFocus name="title" placeholder="要完成的一件事" required maxLength={100} /></Field><Field label="截止日期（可选）"><input name="dueDate" type="date" /></Field><Field label="备注（可选）"><textarea name="note" rows={3} placeholder="补充一点细节" maxLength={500} /></Field><button className="primary-button">添加事项</button></form></Modal>}
     {modal === 'template' && <Modal title="新建出门检查模板" onClose={() => setModal(null)}><form onSubmit={createTemplate} className="form-stack"><Field label="模板名称"><input autoFocus name="title" placeholder="例如：遛狗出门" required maxLength={60} /></Field><Field label="检查项目（每行或逗号分隔）"><textarea name="items" rows={5} placeholder={'牵引绳\n拾便袋\n水壶'} required /></Field><button className="primary-button">保存模板</button></form></Modal>}
