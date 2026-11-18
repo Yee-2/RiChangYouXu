@@ -79,6 +79,8 @@ Auth uses Supabase GoTrue (`/auth/v1/*`) configured in `supabase/config.toml` wi
   Called automatically on signup (`handle_new_user`) to seed default categories, payment methods, and settings.
 - **`process_due_subscriptions() -> integer`**
   Advances past-due active subscriptions (`auto_renew = true`) to the next billing date and logs renewal events. Scheduled daily via `pg_cron`.
+- **`renew_subscription(p_subscription_id uuid, p_cycles integer DEFAULT 1, p_amount numeric DEFAULT NULL, p_payment_method_id uuid DEFAULT NULL, p_note text DEFAULT NULL) -> jsonb`**
+  Atomically performs an in-app renewal for the authenticated active user: extends `next_renewal_date` from the existing due date (when active/trial and not expired) or resets from today (`Asia/Shanghai`) across `p_cycles` cycles, sets status to `active`, writes a `charge` event to `public.subscription_events` with `meta.in_app_renewal = true`, and returns `{ "subscription": ..., "event": ... }`.
 - **`verify_cron_secret(p_secret text) -> boolean`**
   Validates internal `x-cron-secret` header against `private.cron_secrets` (service-only).
 

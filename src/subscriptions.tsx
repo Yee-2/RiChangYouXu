@@ -6,6 +6,7 @@ import {
   CURRENCIES,
   categoryDisplayName,
   convertAmount,
+  currencySymbol,
   cycleLabel,
   daysBetween,
   formatMoney,
@@ -13,6 +14,8 @@ import {
   getRenewalBadge,
   localTodayKey,
   paymentDisplayName,
+  previewRenewalSchedule,
+  renewalDurationLabel,
   statusLabel,
   t,
   templateDisplayName,
@@ -80,6 +83,58 @@ export function ServiceTile({
   );
 }
 
+function SubscriptionListRow({
+  sub,
+  locale,
+  subtitle,
+  rightMeta,
+  muted = false,
+  canEdit,
+  onSelect,
+  onRenew,
+}: {
+  sub: Subscription;
+  locale: Locale;
+  subtitle: string;
+  rightMeta: ReactNode;
+  muted?: boolean;
+  canEdit: boolean;
+  onSelect: () => void;
+  onRenew: () => void;
+}) {
+  return (
+    <div className="sub-row-item">
+      <button
+        type="button"
+        className={`sub-row ${muted ? 'is-muted' : ''}`}
+        onClick={onSelect}
+      >
+        <ServiceTile name={sub.name} color={sub.color} icon={sub.icon} />
+        <span className="sub-row-info">
+          <b>{sub.name}</b>
+          <small>{subtitle}</small>
+        </span>
+        <span className="sub-row-right">
+          <b className="tabular">{formatMoney(sub.amount, sub.currency, locale)}</b>
+          {rightMeta}
+        </span>
+      </button>
+      {canEdit && (
+        <button
+          type="button"
+          className="quick-renew-btn"
+          onClick={onRenew}
+          title={t(locale, 'renewNow')}
+          aria-label={`${t(locale, 'renewNow')} ${sub.name}`}
+        >
+          <Icon name="repeat" size={14} />
+          <span>{t(locale, 'renewNow')}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function OverviewTab({
   locale,
   baseCurrency,
@@ -91,6 +146,7 @@ export function OverviewTab({
   onAdd,
   onGoSubscriptions,
   onSelectSubscription,
+  onRenew,
 }: {
   locale: Locale;
   baseCurrency: CurrencyCode;
@@ -102,6 +158,7 @@ export function OverviewTab({
   onAdd: () => void;
   onGoSubscriptions: () => void;
   onSelectSubscription: (sub: Subscription) => void;
+  onRenew: (sub: Subscription) => void;
 }) {
   const todayKey = localTodayKey();
   const monthPrefix = todayKey.slice(0, 7);
@@ -242,26 +299,18 @@ export function OverviewTab({
             {metrics.upcoming.map((sub) => {
               const badge = getRenewalBadge(sub, locale, todayKey);
               const pm = paymentMethods.find((p) => p.id === sub.payment_method_id);
+              const subtitle = `${cycleLabel(sub.interval, sub.interval_count, locale)}${pm ? ` · ${paymentDisplayName(pm, locale)}` : ''}`;
               return (
-                <button
-                  type="button"
+                <SubscriptionListRow
                   key={sub.id}
-                  className="sub-row"
-                  onClick={() => onSelectSubscription(sub)}
-                >
-                  <ServiceTile name={sub.name} color={sub.color} icon={sub.icon} />
-                  <span className="sub-row-info">
-                    <b>{sub.name}</b>
-                    <small>
-                      {cycleLabel(sub.interval, sub.interval_count, locale)}
-                      {pm ? ` · ${paymentDisplayName(pm, locale)}` : ''}
-                    </small>
-                  </span>
-                  <span className="sub-row-right">
-                    <b className="tabular">{formatMoney(sub.amount, sub.currency, locale)}</b>
-                    <span className={`badge-pill ${badge.tone}`}>{badge.text}</span>
-                  </span>
-                </button>
+                  sub={sub}
+                  locale={locale}
+                  subtitle={subtitle}
+                  rightMeta={<span className={`badge-pill ${badge.tone}`}>{badge.text}</span>}
+                  canEdit={canEdit}
+                  onSelect={() => onSelectSubscription(sub)}
+                  onRenew={() => onRenew(sub)}
+                />
               );
             })}
           </div>
@@ -365,6 +414,7 @@ export function SubscriptionsTab({
   canEdit,
   onAdd,
   onSelectSubscription,
+  onRenew,
 }: {
   locale: Locale;
   baseCurrency: CurrencyCode;
@@ -375,6 +425,7 @@ export function SubscriptionsTab({
   canEdit: boolean;
   onAdd: () => void;
   onSelectSubscription: (sub: Subscription) => void;
+  onRenew: (sub: Subscription) => void;
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | SubscriptionStatus>('all');
@@ -513,30 +564,24 @@ export function SubscriptionsTab({
                   const pm = paymentMethods.find((p) => p.id === sub.payment_method_id);
                   const badge = getRenewalBadge(sub, locale, todayKey);
                   const muted = sub.status === 'paused' || sub.status === 'cancelled';
+                  const subtitle = `${cycleLabel(sub.interval, sub.interval_count, locale)}${pm ? ` · ${paymentDisplayName(pm, locale)}` : ''}`;
+                  const rightMeta = sub.status === 'trial' || muted ? (
+                    <span className={`badge-pill ${badge.tone}`}>{badge.text}</span>
+                  ) : (
+                    <small className="date-sub">{formatShortDate(sub.next_renewal_date, locale)}</small>
+                  );
                   return (
-                    <button
-                      type="button"
+                    <SubscriptionListRow
                       key={sub.id}
-                      className={`sub-row ${muted ? 'is-muted' : ''}`}
-                      onClick={() => onSelectSubscription(sub)}
-                    >
-                      <ServiceTile name={sub.name} color={sub.color} icon={sub.icon} />
-                      <span className="sub-row-info">
-                        <b>{sub.name}</b>
-                        <small>
-                          {cycleLabel(sub.interval, sub.interval_count, locale)}
-                          {pm ? ` · ${paymentDisplayName(pm, locale)}` : ''}
-                        </small>
-                      </span>
-                      <span className="sub-row-right">
-                        <b className="tabular">{formatMoney(sub.amount, sub.currency, locale)}</b>
-                        {sub.status === 'trial' || muted ? (
-                          <span className={`badge-pill ${badge.tone}`}>{badge.text}</span>
-                        ) : (
-                          <small className="date-sub">{formatShortDate(sub.next_renewal_date, locale)}</small>
-                        )}
-                      </span>
-                    </button>
+                      sub={sub}
+                      locale={locale}
+                      subtitle={subtitle}
+                      rightMeta={rightMeta}
+                      muted={muted}
+                      canEdit={canEdit}
+                      onSelect={() => onSelectSubscription(sub)}
+                      onRenew={() => onRenew(sub)}
+                    />
                   );
                 })}
               </div>
@@ -557,7 +602,7 @@ function occursOnDateInMonth(sub: Subscription, year: number, monthIndex: number
   }
 
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const [ay, am, ad] = sub.start_date.split('-').map(Number);
+  const [ay, am, ad] = sub.next_renewal_date.split('-').map(Number);
   if (!ay || !am || !ad) return [];
 
   const anchorUtc = Date.UTC(ay, am - 1, ad);
@@ -596,13 +641,17 @@ export function CalendarTab({
   baseCurrency,
   subscriptions,
   ratesMap,
+  canEdit,
   onSelectSubscription,
+  onRenew,
 }: {
   locale: Locale;
   baseCurrency: CurrencyCode;
   subscriptions: Subscription[];
   ratesMap: Map<string, number>;
+  canEdit: boolean;
   onSelectSubscription: (sub: Subscription) => void;
+  onRenew: (sub: Subscription) => void;
 }) {
   const todayKey = localTodayKey();
   const now = new Date();
@@ -736,24 +785,20 @@ export function CalendarTab({
         ) : (
           <div className="sub-list">
             {selectedItems.map((sub) => (
-              <button
-                type="button"
+              <SubscriptionListRow
                 key={sub.id}
-                className="sub-row"
-                onClick={() => onSelectSubscription(sub)}
-              >
-                <ServiceTile name={sub.name} color={sub.color} icon={sub.icon} />
-                <span className="sub-row-info">
-                  <b>{sub.name}</b>
-                  <small>{cycleLabel(sub.interval, sub.interval_count, locale)}</small>
-                </span>
-                <span className="sub-row-right">
-                  <b className="tabular">{formatMoney(sub.amount, sub.currency, locale)}</b>
+                sub={sub}
+                locale={locale}
+                subtitle={cycleLabel(sub.interval, sub.interval_count, locale)}
+                rightMeta={(
                   <span className={`badge-pill ${sub.status === 'trial' ? 'amber' : 'indigo'}`}>
                     {statusLabel(sub.status, locale)}
                   </span>
-                </span>
-              </button>
+                )}
+                canEdit={canEdit}
+                onSelect={() => onSelectSubscription(sub)}
+                onRenew={() => onRenew(sub)}
+              />
             ))}
           </div>
         )}
@@ -1136,6 +1181,7 @@ export function SubscriptionDetailModal({
   canEdit,
   onClose,
   onEdit,
+  onRenew,
   onLogCharge,
   onTogglePause,
   onCancelSub,
@@ -1152,6 +1198,7 @@ export function SubscriptionDetailModal({
   canEdit: boolean;
   onClose: () => void;
   onEdit: () => void;
+  onRenew: () => void;
   onLogCharge: () => Promise<void>;
   onTogglePause: () => Promise<void>;
   onCancelSub: () => Promise<void>;
@@ -1233,7 +1280,11 @@ export function SubscriptionDetailModal({
 
       {canEdit && (
         <div className="detail-actions">
-          <button type="button" className="primary-button compact" disabled={busy} onClick={() => void runAction(onLogCharge)}>
+          <button type="button" className="primary-button compact" disabled={busy} onClick={onRenew}>
+            <Icon name="repeat" size={16} />
+            {t(locale, 'renewNow')}
+          </button>
+          <button type="button" className="soft-button compact" disabled={busy} onClick={() => void runAction(onLogCharge)}>
             <Icon name="check" size={16} />
             {t(locale, 'logChargeAction')}
           </button>
@@ -1275,28 +1326,294 @@ export function SubscriptionDetailModal({
           <p className="muted">{t(locale, 'noEvents')}</p>
         ) : (
           <div className="event-list">
-            {events.map((ev) => (
-              <div key={ev.id} className="event-row">
-                <div>
-                  <b>
-                    {ev.type === 'charge'
-                      ? t(locale, 'eventCharge')
-                      : ev.type === 'price_change'
-                        ? t(locale, 'eventPriceChange')
-                        : t(locale, 'eventStatusChange')}
-                  </b>
-                  <small>{ev.occurred_on}</small>
+            {events.map((ev) => {
+              const isInAppRenewal = ev.type === 'charge' && Boolean(ev.meta?.in_app_renewal);
+              const cycleCount = Number(ev.meta?.cycles ?? 0);
+              const newRenewalMeta = typeof ev.meta?.new_renewal_date === 'string' ? ev.meta.new_renewal_date : '';
+              const pmText = locale === 'en'
+                ? String(ev.meta?.payment_method_name_en || ev.meta?.payment_method_name || '')
+                : String(ev.meta?.payment_method_name || '');
+              const noteText = typeof ev.meta?.note === 'string' ? ev.meta.note.trim() : '';
+              const metaParts = [ev.occurred_on];
+              if (isInAppRenewal && newRenewalMeta) metaParts.push(`→ ${newRenewalMeta}`);
+              if (pmText) metaParts.push(pmText);
+              if (noteText) metaParts.push(noteText);
+              return (
+                <div key={ev.id} className="event-row">
+                  <div>
+                    <b>
+                      {isInAppRenewal
+                        ? `${t(locale, 'eventInAppRenewal')}${cycleCount > 0 ? ` ×${cycleCount}` : ''}`
+                        : ev.type === 'charge'
+                          ? t(locale, 'eventCharge')
+                          : ev.type === 'price_change'
+                            ? t(locale, 'eventPriceChange')
+                            : t(locale, 'eventStatusChange')}
+                    </b>
+                    <small>{metaParts.join(' · ')}</small>
+                  </div>
+                  <span className="tabular">
+                    {ev.type === 'status_change'
+                      ? `${statusLabel(String(ev.meta?.from ?? 'active') as SubscriptionStatus, locale)} → ${statusLabel(String(ev.meta?.to ?? 'active') as SubscriptionStatus, locale)}`
+                      : formatMoney(ev.amount, ev.currency, locale)}
+                  </span>
                 </div>
-                <span className="tabular">
-                  {ev.type === 'status_change'
-                    ? `${statusLabel(String(ev.meta?.from ?? 'active') as SubscriptionStatus, locale)} → ${statusLabel(String(ev.meta?.to ?? 'active') as SubscriptionStatus, locale)}`
-                    : formatMoney(ev.amount, ev.currency, locale)}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
+    </SheetModal>
+  );
+}
+
+const RENEWAL_CYCLE_PRESETS = [1, 2, 3, 6, 12] as const;
+
+export function RenewCheckoutModal({
+  locale,
+  sub,
+  baseCurrency,
+  paymentMethods,
+  ratesMap,
+  onClose,
+  onConfirmRenew,
+}: {
+  locale: Locale;
+  sub: Subscription;
+  baseCurrency: CurrencyCode;
+  paymentMethods: PaymentMethod[];
+  ratesMap: Map<string, number>;
+  onClose: () => void;
+  onConfirmRenew: (payload: {
+    cycles: number;
+    amount: number;
+    paymentMethodId: string | null;
+    note: string;
+  }) => Promise<Subscription | null>;
+}) {
+  const digits = sub.currency === 'JPY' ? 0 : 2;
+  const [cycles, setCycles] = useState<number>(1);
+  const [amountInput, setAmountInput] = useState<string>(() => Number(sub.amount).toFixed(digits));
+  const [amountOverridden, setAmountOverridden] = useState(false);
+  const [paymentMethodId, setPaymentMethodId] = useState<string | null>(sub.payment_method_id);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [receipt, setReceipt] = useState<{
+    updatedSub: Subscription;
+    paidAmount: number;
+    cycles: number;
+    paymentMethodId: string | null;
+  } | null>(null);
+
+  const schedule = useMemo(() => previewRenewalSchedule(sub, cycles), [sub, cycles]);
+  const standardTotal = Number((Number(sub.amount) * cycles).toFixed(digits));
+  const parsedAmount = Number(amountInput);
+  const validAmount = Number.isFinite(parsedAmount) && parsedAmount >= 0;
+  const displayAmount = validAmount ? Number(parsedAmount.toFixed(digits)) : 0;
+  const convertedTotal = convertAmount(displayAmount, sub.currency, baseCurrency, ratesMap);
+  const badge = getRenewalBadge(sub, locale);
+
+  const selectCycles = (nextCycles: number) => {
+    setCycles(nextCycles);
+    if (!amountOverridden) {
+      setAmountInput((Number(sub.amount) * nextCycles).toFixed(digits));
+    }
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!validAmount || busy) return;
+    setBusy(true);
+    try {
+      const updated = await onConfirmRenew({
+        cycles,
+        amount: displayAmount,
+        paymentMethodId,
+        note: note.trim(),
+      });
+      if (updated) {
+        setReceipt({
+          updatedSub: updated,
+          paidAmount: displayAmount,
+          cycles,
+          paymentMethodId,
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const receiptPm = receipt ? paymentMethods.find((p) => p.id === receipt.paymentMethodId) : null;
+
+  return (
+    <SheetModal title={t(locale, 'renewCheckoutTitle')} onClose={onClose}>
+      {receipt ? (
+        <div className="renewal-receipt">
+          <div className="receipt-badge">
+            <Icon name="check_circle" size={34} />
+          </div>
+          <h3>{t(locale, 'renewSuccessTitle')}</h3>
+          <p className="muted">{t(locale, 'renewSuccessDesc')}</p>
+
+          <div className="receipt-summary">
+            <div className="receipt-row">
+              <span>{sub.name}</span>
+              <b className="tabular">{formatMoney(receipt.paidAmount, sub.currency, locale)}</b>
+            </div>
+            <div className="receipt-row">
+              <span>{t(locale, 'renewReceiptCycles')}</span>
+              <b>
+                {receipt.cycles} {t(locale, 'renewCycleUnit')} ({renewalDurationLabel(sub.interval, sub.interval_count, receipt.cycles, locale)})
+              </b>
+            </div>
+            <div className="receipt-row">
+              <span>{t(locale, 'renewSelectPayment')}</span>
+              <b>{receiptPm ? paymentDisplayName(receiptPm, locale) : t(locale, 'unassigned')}</b>
+            </div>
+            <div className="receipt-row highlight">
+              <span>{t(locale, 'renewNewDue')}</span>
+              <b className="tabular">{receipt.updatedSub.next_renewal_date}</b>
+            </div>
+          </div>
+
+          <button type="button" className="primary-button full-width" onClick={onClose}>
+            {t(locale, 'renewReceiptDone')}
+          </button>
+        </div>
+      ) : (
+        <form className="form-stack" onSubmit={(e) => void handleSubmit(e)}>
+          <div className="checkout-hero">
+            <ServiceTile name={sub.name} color={sub.color} icon={sub.icon} size="lg" />
+            <div className="checkout-hero-copy">
+              <b>{sub.name}</b>
+              <div className="checkout-hero-meta">
+                <span className="tabular">{formatMoney(sub.amount, sub.currency, locale)} / {cycleLabel(sub.interval, sub.interval_count, locale)}</span>
+                <span className={`badge-pill ${badge.tone}`}>{badge.text}</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span className="field-label">{t(locale, 'renewCyclesLabel')}</span>
+            <div className="cycle-grid">
+              {RENEWAL_CYCLE_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`cycle-card ${cycles === preset ? 'active' : ''}`}
+                  onClick={() => selectCycles(preset)}
+                >
+                  <b>×{preset}</b>
+                  <small>{renewalDurationLabel(sub.interval, sub.interval_count, preset, locale)}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rollover-preview-card">
+            <div className="rollover-head">
+              <span>{t(locale, 'renewSchedulePreview')}</span>
+              <span className={`badge-pill ${schedule.isExtend ? 'mint' : 'indigo'}`}>
+                {schedule.isExtend ? t(locale, 'renewFromExisting') : t(locale, 'renewFromToday')}
+              </span>
+            </div>
+            <div className="rollover-dates tabular">
+              <div>
+                <small>{t(locale, 'renewCurrentDue')}</small>
+                <b>{schedule.currentDue}</b>
+              </div>
+              <Icon name="arrow_forward" size={16} />
+              <div>
+                <small>{t(locale, 'renewNewDue')}</small>
+                <b className="rollover-target">{schedule.nextRenewalDate}</b>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span className="field-label">{t(locale, 'renewSelectPayment')}</span>
+            <div className="pm-select-grid">
+              {paymentMethods.map((pm) => (
+                <button
+                  key={pm.id}
+                  type="button"
+                  className={`pm-select-chip ${paymentMethodId === pm.id ? 'active' : ''}`}
+                  onClick={() => setPaymentMethodId(pm.id)}
+                >
+                  <Icon name={pm.type === 'wallet' ? 'wallet' : 'credit_card'} size={15} />
+                  <span>{paymentDisplayName(pm, locale)}</span>
+                </button>
+              ))}
+              {(paymentMethods.length === 0 || sub.payment_method_id === null) && (
+                <button
+                  type="button"
+                  className={`pm-select-chip ${paymentMethodId === null ? 'active' : ''}`}
+                  onClick={() => setPaymentMethodId(null)}
+                >
+                  <span>{t(locale, 'unassigned')}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="field-head-split">
+              <span>{t(locale, 'renewAmountLabel')} ({currencySymbol(sub.currency).trim()} {sub.currency})</span>
+              {amountOverridden && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setAmountOverridden(false);
+                    setAmountInput(standardTotal.toFixed(digits));
+                  }}
+                >
+                  {t(locale, 'renewResetStandard')}
+                </button>
+              )}
+            </div>
+            <input
+              type="number"
+              step={sub.currency === 'JPY' ? '1' : '0.01'}
+              min="0"
+              value={amountInput}
+              onChange={(e) => {
+                setAmountOverridden(true);
+                setAmountInput(e.target.value);
+              }}
+              required
+            />
+            {sub.currency !== baseCurrency && validAmount && (
+              <small className="muted tabular">≈ {formatMoney(convertedTotal, baseCurrency, locale)}</small>
+            )}
+          </div>
+
+          <label className="field">
+            <span>{t(locale, 'renewNoteLabel')}</span>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={200}
+              placeholder={t(locale, 'renewNotePlaceholder')}
+            />
+          </label>
+
+          <button type="submit" className="primary-button full-width" disabled={busy || !validAmount}>
+            <Icon name="check" size={17} />
+            {busy
+              ? t(locale, 'renewProcessing')
+              : `${t(locale, 'renewConfirmPay')} · ${formatMoney(displayAmount, sub.currency, locale)}`}
+          </button>
+
+          {sub.url && (
+            <a className="checkout-official-link" href={sub.url} target="_blank" rel="noreferrer">
+              {t(locale, 'renewOfficialPortal')}
+              <Icon name="open_in_new" size={14} />
+            </a>
+          )}
+        </form>
+      )}
     </SheetModal>
   );
 }

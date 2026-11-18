@@ -113,6 +113,75 @@ export function daysBetween(fromDate: string, toDate: string): number {
   return Math.round((b - a) / (24 * 60 * 60 * 1000));
 }
 
+function addDaysKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  if (!y || !m || !d) return dateKey;
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+function addMonthsClamped(dateKey: string, months: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  if (!y || !m || !d) return dateKey;
+  const totalMonths = y * 12 + (m - 1) + months;
+  const targetYear = Math.floor(totalMonths / 12);
+  const targetMonth = (totalMonths % 12) + 1;
+  const maxDay = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
+  const clampedDay = Math.min(d, maxDay);
+  return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+}
+
+export function previewRenewalSchedule(
+  sub: Pick<Subscription, 'status' | 'next_renewal_date' | 'trial_end_date' | 'interval' | 'interval_count'>,
+  cycles = 1,
+  todayKey = localTodayKey()
+): { currentDue: string; baseDate: string; nextRenewalDate: string; isExtend: boolean } {
+  const count = Math.max(1, Math.min(60, Math.floor(cycles || 1)));
+  const step = count * Math.max(1, Number(sub.interval_count) || 1);
+  const currentDue = sub.status === 'trial' && sub.trial_end_date ? sub.trial_end_date : sub.next_renewal_date;
+  const isExtend = (sub.status === 'active' || sub.status === 'trial') && currentDue >= todayKey;
+  const baseDate = isExtend ? currentDue : todayKey;
+
+  let nextRenewalDate: string;
+  if (sub.interval === 'week') {
+    nextRenewalDate = addDaysKey(baseDate, step * 7);
+  } else if (sub.interval === 'month') {
+    nextRenewalDate = addMonthsClamped(baseDate, step);
+  } else if (sub.interval === 'quarter') {
+    nextRenewalDate = addMonthsClamped(baseDate, step * 3);
+  } else if (sub.interval === 'year') {
+    nextRenewalDate = addMonthsClamped(baseDate, step * 12);
+  } else {
+    nextRenewalDate = addDaysKey(baseDate, step);
+  }
+
+  return { currentDue, baseDate, nextRenewalDate, isExtend };
+}
+
+export function renewalDurationLabel(
+  interval: BillingInterval,
+  intervalCount: number,
+  cycles: number,
+  locale: Locale
+): string {
+  const count = Math.max(1, Number(intervalCount) || 1);
+  if (interval === 'custom') {
+    const totalDays = cycles * count;
+    return locale === 'en' ? `${totalDays}d` : `${totalDays} 天`;
+  }
+  if (count === 1) {
+    if (locale === 'en') {
+      const unit = interval === 'week' ? 'wk' : interval === 'month' ? 'mo' : interval === 'quarter' ? 'qtr' : 'yr';
+      return `${cycles} ${unit}${cycles > 1 ? 's' : ''}`;
+    }
+    const unit = interval === 'week' ? '周' : interval === 'month' ? '个月' : interval === 'quarter' ? '个季度' : '年';
+    return `${cycles} ${unit}`;
+  }
+  return locale === 'en'
+    ? `${cycles}×${cycleLabel(interval, count, locale)}`
+    : `${cycles} × ${cycleLabel(interval, count, locale)}`;
+}
+
 export function formatShortDate(dateStr: string, locale: Locale): string {
   const dt = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(dt.getTime())) return dateStr;
@@ -287,8 +356,32 @@ const zhDict = {
   eventHistory: '扣费与变更记录',
   noEvents: '暂无历史记录',
   eventCharge: '扣费记录',
+  eventInAppRenewal: '应用内续费',
   eventPriceChange: '价格变更',
   eventStatusChange: '状态变更',
+  renewNow: '立即续费',
+  renewInApp: '应用内续费',
+  renewCheckoutTitle: '续费收银台',
+  renewCyclesLabel: '选择续费时长',
+  renewCycleUnit: '个周期',
+  renewSchedulePreview: '有效期顺延预览',
+  renewFromExisting: '未到期 · 从原到期日顺延',
+  renewFromToday: '从今日起重新起算',
+  renewCurrentDue: '当前到期',
+  renewNewDue: '续费后到期',
+  renewSelectPayment: '扣款支付方式',
+  renewAmountLabel: '本次实付金额',
+  renewResetStandard: '恢复标准价',
+  renewNoteLabel: '续费备注（可选）',
+  renewNotePlaceholder: '例如：年付优惠券、联合会员抵扣…',
+  renewConfirmPay: '确认支付并续费',
+  renewProcessing: '正在处理续费账单…',
+  renewSuccessTitle: '续费已完成',
+  renewSuccessDesc: '账单已记录，下次续费日期已自动顺延同步至云端。',
+  renewReceiptCycles: '续费期数',
+  renewReceiptDone: '完成',
+  renewOfficialPortal: '或前往官方页面续费',
+  renewCompletedToast: '续费成功，到期日已顺延',
   calendarTitle: '续费日历',
   calendarMonthTotal: '本月预计扣费',
   calendarToday: '回到本月',
@@ -430,8 +523,32 @@ const enDict: Record<keyof typeof zhDict, string> = {
   eventHistory: 'Billing & Activity History',
   noEvents: 'No activity recorded yet',
   eventCharge: 'Charge',
+  eventInAppRenewal: 'In-App Renewal',
   eventPriceChange: 'Price Change',
   eventStatusChange: 'Status Change',
+  renewNow: 'Renew',
+  renewInApp: 'In-App Renewal',
+  renewCheckoutTitle: 'Renewal Checkout',
+  renewCyclesLabel: 'Renewal Duration',
+  renewCycleUnit: 'cycles',
+  renewSchedulePreview: 'Validity Rollover Preview',
+  renewFromExisting: 'Active · Extends from due date',
+  renewFromToday: 'Starts fresh from today',
+  renewCurrentDue: 'Current Due',
+  renewNewDue: 'New Due Date',
+  renewSelectPayment: 'Payment Method',
+  renewAmountLabel: 'Total Payment',
+  renewResetStandard: 'Reset standard price',
+  renewNoteLabel: 'Renewal Note (optional)',
+  renewNotePlaceholder: 'e.g. Promo code, bundle discount…',
+  renewConfirmPay: 'Confirm & Renew',
+  renewProcessing: 'Processing renewal…',
+  renewSuccessTitle: 'Renewal Complete',
+  renewSuccessDesc: 'Payment recorded and next billing date synced to the cloud.',
+  renewReceiptCycles: 'Cycles Renewed',
+  renewReceiptDone: 'Done',
+  renewOfficialPortal: 'Or open official billing page',
+  renewCompletedToast: 'Renewed successfully',
   calendarTitle: 'Renewal Calendar',
   calendarMonthTotal: 'Scheduled this month',
   calendarToday: 'This Month',

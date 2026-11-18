@@ -426,8 +426,15 @@ button:disabled { opacity: 0.52; cursor: not-allowed; }
   gap: 4px;
 }
 
+.sub-row-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .sub-row {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -442,6 +449,24 @@ button:disabled { opacity: 0.52; cursor: not-allowed; }
 
 .sub-row:hover { background: var(--surface-2); }
 .sub-row.is-muted { opacity: 0.62; }
+
+.quick-renew-btn {
+  flex: none;
+  border: 1px solid rgba(91, 91, 240, 0.24);
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 99px;
+  padding: 6px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: background 0.14s ease, transform 0.12s ease;
+}
+
+.quick-renew-btn:hover { background: var(--primary); color: #FFFFFF; }
 
 .service-tile {
   width: 42px;
@@ -1096,6 +1121,193 @@ button:disabled { opacity: 0.52; cursor: not-allowed; }
 }
 .event-row small { display: block; color: var(--muted); font-size: 11px; }
 
+/* In-App Renewal Checkout */
+.checkout-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--field);
+  border: 1px solid var(--line);
+}
+
+.checkout-hero-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.checkout-hero-copy > b { font-size: 16px; font-weight: 800; }
+
+.checkout-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cycle-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cycle-card {
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 10px 6px;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.12s ease;
+}
+
+.cycle-card b { font-size: 15px; font-weight: 800; }
+.cycle-card small { font-size: 11px; color: var(--muted); font-weight: 600; }
+
+.cycle-card.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.cycle-card.active small { color: var(--primary); }
+
+.rollover-preview-card {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+}
+
+.rollover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.rollover-dates {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rollover-dates small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.rollover-dates b { font-size: 14px; font-weight: 800; }
+.rollover-dates .rollover-target { color: var(--primary); }
+.rollover-dates .icon { color: var(--muted); flex: none; }
+
+.pm-select-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pm-select-chip {
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-select-chip.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.field-head-split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.checkout-official-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-top: 2px;
+}
+
+.checkout-official-link:hover { color: var(--primary); }
+
+.renewal-receipt {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.receipt-badge {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: var(--mint-soft);
+  color: var(--mint);
+  display: grid;
+  place-items: center;
+}
+
+.renewal-receipt h3 { margin: 2px 0 0; font-size: 19px; font-weight: 800; }
+.renewal-receipt p { margin: 0 0 6px; max-width: 340px; }
+
+.receipt-summary {
+  width: 100%;
+  border-radius: 16px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  display: grid;
+  margin-bottom: 6px;
+  text-align: left;
+}
+
+.receipt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.receipt-row:last-child { border-bottom: 0; }
+.receipt-row span { color: var(--muted); }
+.receipt-row.highlight b { color: var(--primary); }
+
 /* Manage Modal */
 .manage-list { display: grid; gap: 6px; margin-bottom: 16px; max-height: 220px; overflow-y: auto; }
 .manage-row {
@@ -1628,6 +1840,10 @@ button:disabled { opacity: 0.52; cursor: not-allowed; }
   .donut-layout { grid-template-columns: 1fr; }
   .two-col { grid-template-columns: 1fr; }
   .segmented { grid-template-columns: repeat(3, 1fr); }
+  .cycle-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sub-row-item { gap: 6px; }
+  .sub-row { gap: 9px; padding: 9px 6px; }
+  .quick-renew-btn { padding: 5px 8px; }
   .detail-metrics-grid { grid-template-columns: 1fr; }
   .admin-data-row { flex-direction: column; align-items: flex-start; }
 }

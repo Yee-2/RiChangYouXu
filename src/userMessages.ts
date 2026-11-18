@@ -69,8 +69,14 @@ export function toUserMessage(value: unknown, locale: Locale = 'zh-CN', fallback
   if (/confirmation_required/.test(normalized)) {
     return locale === 'en' ? 'Please enter the exact confirmation text.' : '请输入正确的确认内容后再提交。';
   }
-  if (/account_not_active/.test(normalized)) {
+  if (/account_not_active|account_restricted/.test(normalized)) {
     return locale === 'en' ? 'Your account is restricted and cannot perform this action.' : '当前账号处于受限状态，暂不能执行此操作。';
+  }
+  if (/subscription_not_found/.test(normalized)) {
+    return locale === 'en' ? 'Subscription record could not be found.' : '未找到对应的订阅记录。';
+  }
+  if (/invalid_payment_method/.test(normalized)) {
+    return locale === 'en' ? 'Selected payment method is invalid.' : '选择的支付方式无效，请刷新后重试。';
   }
   if (/categories_user_name_key|payment_methods_user_name_key|duplicate key value/.test(normalized)) {
     return locale === 'en' ? 'An item with that name already exists.' : '名称已存在，请换一个名称。';

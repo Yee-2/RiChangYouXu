@@ -16,6 +16,7 @@ import {
   CategoriesModal,
   OverviewTab,
   PaymentMethodsModal,
+  RenewCheckoutModal,
   SubscriptionDetailModal,
   SubscriptionFormModal,
   SubscriptionsTab,
@@ -111,6 +112,7 @@ function RenewlyApp() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
+  const [renewingSub, setRenewingSub] = useState<Subscription | null>(null);
   const [detailSub, setDetailSub] = useState<Subscription | null>(null);
   const [detailEvents, setDetailEvents] = useState<SubscriptionEvent[]>([]);
   const [detailEventsLoading, setDetailEventsLoading] = useState(false);
@@ -465,6 +467,36 @@ function RenewlyApp() {
     }
   };
 
+  const renewSubscription = async (
+    sub: Subscription,
+    payload: { cycles: number; amount: number; paymentMethodId: string | null; note: string }
+  ): Promise<Subscription | null> => {
+    if (!session || !canEdit) return null;
+    try {
+      const { supabase } = await import('./supabase');
+      if (!supabase) return null;
+      const { data, error } = await supabase.rpc('renew_subscription', {
+        p_subscription_id: sub.id,
+        p_cycles: payload.cycles,
+        p_amount: payload.amount,
+        p_payment_method_id: payload.paymentMethodId,
+        p_note: payload.note || null,
+      });
+      if (error) throw error;
+      const result = data as { subscription?: Subscription } | null;
+      const updated = result?.subscription ?? null;
+      setToast(t(locale, 'renewCompletedToast'));
+      await loadCloudData(session.user.id);
+      if (detailSub?.id === sub.id && updated) {
+        void openDetail(updated);
+      }
+      return updated;
+    } catch (cause) {
+      notify(cause);
+      return null;
+    }
+  };
+
   const deleteSubscription = async (sub: Subscription) => {
     if (!session || !canEdit) return;
     try {
@@ -794,6 +826,7 @@ function RenewlyApp() {
             onAdd={() => { setEditingSub(null); setShowForm(true); }}
             onGoSubscriptions={() => setNav('subscriptions')}
             onSelectSubscription={(sub) => void openDetail(sub)}
+            onRenew={(sub) => setRenewingSub(sub)}
           />
         ) : nav === 'subscriptions' ? (
           <SubscriptionsTab
@@ -806,6 +839,7 @@ function RenewlyApp() {
             canEdit={canEdit}
             onAdd={() => { setEditingSub(null); setShowForm(true); }}
             onSelectSubscription={(sub) => void openDetail(sub)}
+            onRenew={(sub) => setRenewingSub(sub)}
           />
         ) : nav === 'calendar' ? (
           <CalendarTab
@@ -813,7 +847,9 @@ function RenewlyApp() {
             baseCurrency={settings.base_currency}
             subscriptions={subscriptions}
             ratesMap={ratesMap}
+            canEdit={canEdit}
             onSelectSubscription={(sub) => void openDetail(sub)}
+            onRenew={(sub) => setRenewingSub(sub)}
           />
         ) : (
           <div className="tab-stack">
@@ -1059,10 +1095,23 @@ function RenewlyApp() {
             setEditingSub(target);
             setShowForm(true);
           }}
+          onRenew={() => setRenewingSub(detailSub)}
           onLogCharge={() => logCharge(detailSub)}
           onTogglePause={() => togglePause(detailSub)}
           onCancelSub={() => cancelSub(detailSub)}
           onDelete={() => deleteSubscription(detailSub)}
+        />
+      )}
+
+      {renewingSub && (
+        <RenewCheckoutModal
+          locale={locale}
+          sub={renewingSub}
+          baseCurrency={settings.base_currency}
+          paymentMethods={paymentMethods}
+          ratesMap={ratesMap}
+          onClose={() => setRenewingSub(null)}
+          onConfirmRenew={(payload) => renewSubscription(renewingSub, payload)}
         />
       )}
 

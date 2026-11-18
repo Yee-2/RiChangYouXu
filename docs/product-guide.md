@@ -17,7 +17,8 @@ Renewly is a cloud-synced personal subscription manager and renewal reminder PWA
 ### Subscriptions (`subscriptions`)
 - **Quick Add & Templates**: Tap `+ Add` to pick from admin-curated service templates (Netflix, Spotify, iCloud+, ChatGPT Plus, Adobe Creative Cloud, etc.) or create a custom subscription.
 - **Flexible Billing**: Configure amount, currency (`CNY`, `USD`, `EUR`, `HKD`, `JPY`, `GBP`), cycle (`week`, `month`, `quarter`, `year`, or custom days), start/next renewal date, trial end date, auto-renew toggle, category, payment method, management/cancel URLs, notes, and custom reminder lead days.
-- **Search, Filter & Actions**: Filter by status (`all`, `trial`, `active`, `paused`, `cancelled`) or category, search by name/note, inspect event history in the detail drawer, record manual renewals, pause/resume, or cancel.
+- **Search, Filter & Actions**: Filter by status (`all`, `trial`, `active`, `paused`, `cancelled`), search by name/note, inspect event history in the detail drawer, renew directly in-app, record manual charges, pause/resume, or cancel.
+- **In-App Renewal Checkout**: Click **Renew** from Overview, Subscriptions, Calendar, or the detail sheet to pick `1` / `2` / `3` / `6` / `12` billing cycles, preview smart rollover dates (extending unexpired subscriptions from the existing due date or restarting overdue/paused plans from today), select a payment method, adjust actual paid amount, add a note, confirm payment, and view an instant receipt synced to Supabase.
 
 ### Calendar (`calendar`)
 - Monthly calendar grid projecting all recurring dates within the selected month and highlighting selected-day renewals and converted amounts.
