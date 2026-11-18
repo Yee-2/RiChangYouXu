@@ -1,7 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const allowedOrigins = new Set([
+  'https://renewly-admin.yeecc.cn',
+  'https://renewly.yeecc.cn',
   'https://admin.yeecc.cn',
+  'https://daily.yeecc.cn',
   'http://localhost:5173',
   'http://127.0.0.1:5173'
 ]);
@@ -61,6 +64,37 @@ Deno.serve(async (request) => {
   const action = input.action;
   if (action === 'verify') {
     return response({ ok: true, actor: { id: actorProfile.id, uid: actorProfile.uid, display_name: actorProfile.display_name, avatar_path: actorProfile.avatar_path, email: userData.user.email ?? actor.email } }, 200, cors);
+  }
+
+  if (action === 'overview') {
+    const shanghaiNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    const shanghaiDay = shanghaiNow.toISOString().slice(0, 10);
+    const todayStartIso = new Date(`${shanghaiDay}T00:00:00+08:00`).toISOString();
+    const tomorrowStartIso = new Date(Date.parse(todayStartIso) + 24 * 60 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
+
+    const [usersRes, subsRes, templatesRes, sentTodayRes, failedTodayRes, restrictedRes] = await Promise.all([
+      serviceClient.from('profiles').select('id', { count: 'exact', head: true }).neq('account_status', 'deleted'),
+      serviceClient.from('subscriptions').select('id', { count: 'exact', head: true }).in('status', ['active', 'trial']),
+      serviceClient.from('subscription_templates').select('id', { count: 'exact', head: true }),
+      serviceClient.from('reminder_log').select('id', { count: 'exact', head: true }).eq('status', 'sent').gte('sent_at', todayStartIso).lt('sent_at', tomorrowStartIso),
+      serviceClient.from('reminder_log').select('id', { count: 'exact', head: true }).eq('status', 'failed').gte('sent_at', todayStartIso).lt('sent_at', tomorrowStartIso),
+      serviceClient.from('profiles').select('id', { count: 'exact', head: true }).or(`account_status.eq.banned,and(account_status.eq.suspended,or(suspension_expires_at.is.null,suspension_expires_at.gt.${nowIso}))`)
+    ]);
+    const err = usersRes.error ?? subsRes.error ?? templatesRes.error ?? sentTodayRes.error ?? failedTodayRes.error ?? restrictedRes.error;
+    if (err) return response({ error: 'overview_query_failed' }, 500, cors);
+
+    return response({
+      ok: true,
+      overview: {
+        totalUsers: usersRes.count ?? 0,
+        activeSubscriptions: subsRes.count ?? 0,
+        totalTemplates: templatesRes.count ?? 0,
+        remindersSentToday: sentTodayRes.count ?? 0,
+        remindersFailedToday: failedTodayRes.count ?? 0,
+        restrictedAccounts: restrictedRes.count ?? 0
+      }
+    }, 200, cors);
   }
 
   if (action === 'list_accounts' || action === 'list_admins' || action === 'list_users') {

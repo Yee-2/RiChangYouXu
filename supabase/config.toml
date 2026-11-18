@@ -6,15 +6,18 @@ verify_jwt = true
 [functions.delete-account]
 verify_jwt = true
 
-[functions.delete-content]
-verify_jwt = true
-
 [functions.admin-manage]
 verify_jwt = true
 
+[functions.send-renewal-reminders]
+verify_jwt = false
+
+[functions.refresh-exchange-rates]
+verify_jwt = false
+
 [auth]
-additional_redirect_urls = ["https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/", "http://localhost:5173/admin", "http://127.0.0.1:5173/admin"]
-site_url = "https://daily.yeecc.cn"
+additional_redirect_urls = ["https://renewly.yeecc.cn/", "https://renewly.yeecc.cn", "https://renewly-admin.yeecc.cn/", "https://renewly-admin.yeecc.cn", "https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/", "http://localhost:5173/admin", "http://127.0.0.1:5173/admin"]
+site_url = "https://renewly.yeecc.cn"
 password_requirements = "letters_digits"
 enable_leaked_password_protection = true
 
@@ -30,7 +33,7 @@ double_confirm_changes = false
 
 [auth.email.notification.password_changed]
 enabled = true
-subject = "您的密码已被修改"
+subject = "Renewly 密码已修改 / Password Changed"
 
 [auth.email.smtp]
 enabled = true
@@ -39,18 +42,18 @@ port = 465
 user = "resend"
 pass = "env(RESEND_SMTP_PASSWORD)"
 admin_email = "no-reply@yeecc.cn"
-sender_name = "日常有序"
+sender_name = "Renewly"
 
 [auth.email.template.confirmation]
-subject = "日常有序邮箱验证码"
+subject = "Renewly 邮箱验证码 / Email Verification Code"
 content_path = "./supabase/templates/confirmation.html"
 
 [auth.email.template.recovery]
-subject = "日常有序密码重置验证码"
+subject = "Renewly 密码重置验证码 / Password Reset Code"
 content_path = "./supabase/templates/recovery.html"
 
 [auth.email.template.magic_link]
-subject = "日常有序登录验证码"
+subject = "Renewly 登录验证码 / Sign-in Verification Code"
 content_path = "./supabase/templates/magic_link.html"
 
 [auth.sms]

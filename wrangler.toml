@@ -2,6 +2,14 @@ name = "richangyouxu"
 compatibility_date = "2026-11-08"
 
 [[routes]]
+pattern = "renewly.yeecc.cn"
+custom_domain = true
+
+[[routes]]
+pattern = "renewly-admin.yeecc.cn"
+custom_domain = true
+
+[[routes]]
 pattern = "daily.yeecc.cn"
 custom_domain = true
 

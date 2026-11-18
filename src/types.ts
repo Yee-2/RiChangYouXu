@@ -1,96 +1,123 @@
-export type NavKey = 'home' | 'lists' | 'records' | 'community' | 'profile';
+export type Locale = 'zh-CN' | 'en';
+export type CurrencyCode = 'CNY' | 'USD' | 'EUR' | 'HKD' | 'JPY' | 'GBP';
 export type ThemeChoice = 'system' | 'light' | 'dark';
+export type NavKey = 'overview' | 'subscriptions' | 'calendar' | 'settings';
+export type BillingInterval = 'week' | 'month' | 'quarter' | 'year' | 'custom';
+export type SubscriptionStatus = 'trial' | 'active' | 'paused' | 'cancelled';
+export type PaymentType = 'alipay' | 'wechat' | 'card' | 'apple_pay' | 'paypal' | 'bank' | 'other' | 'wallet';
 
-export interface Checklist {
+export interface Profile {
   id: string;
-  title: string;
-  createdAt: string;
-  archivedAt?: string;
+  uid?: string;
+  username: string | null;
+  display_name: string;
+  avatar_path: string | null;
+  avatar_url?: string;
+  bio: string;
+  role: 'user' | 'admin';
+  account_status: 'active' | 'suspended' | 'banned' | 'deleted';
+  suspension_expires_at?: string | null;
 }
 
-export interface ChecklistItem {
+export interface Category {
   id: string;
-  checklistId: string;
-  title: string;
-  dueDate?: string;
-  note?: string;
-  done: boolean;
-  completedAt?: string;
-  createdAt: string;
+  user_id: string;
+  key: string;
+  name: string;
+  name_en: string;
+  color: string;
+  icon: string;
+  sort: number;
+  created_at: string;
 }
 
-export interface CheckTemplate {
+export interface PaymentMethod {
   id: string;
-  title: string;
-  items: string[];
-  createdAt: string;
+  user_id: string;
+  name: string;
+  name_en: string;
+  type: PaymentType;
+  last4: string | null;
+  created_at: string;
 }
 
-export interface CheckRun {
+export interface Subscription {
   id: string;
-  templateId: string;
-  title: string;
-  items: { id: string; title: string; done: boolean }[];
-  createdAt: string;
-  completedAt?: string;
+  user_id: string;
+  name: string;
+  color: string;
+  icon: string;
+  amount: number;
+  currency: CurrencyCode;
+  interval: BillingInterval;
+  interval_count: number;
+  start_date: string;
+  next_renewal_date: string;
+  status: SubscriptionStatus;
+  trial_end_date: string | null;
+  auto_renew: boolean;
+  category_id: string | null;
+  payment_method_id: string | null;
+  url: string;
+  cancel_url: string;
+  note: string;
+  reminder_days: number;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export type UtilityKind = 'water' | 'electricity' | 'gas';
-export interface Meter {
+export interface SubscriptionEvent {
+  id: string;
+  subscription_id: string;
+  user_id: string;
+  type: 'charge' | 'price_change' | 'status_change';
+  amount: number;
+  currency: CurrencyCode;
+  occurred_on: string;
+  meta: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface UserSettings {
+  user_id: string;
+  locale: Locale;
+  base_currency: CurrencyCode;
+  theme: ThemeChoice;
+  email_reminders: boolean;
+  default_reminder_days: number;
+  updated_at: string;
+}
+
+export interface ExchangeRate {
+  base: CurrencyCode;
+  quote: CurrencyCode;
+  rate: number;
+  fetched_on: string;
+  updated_at: string;
+}
+
+export interface SubscriptionTemplate {
   id: string;
   name: string;
-  kind: UtilityKind;
-  unit: string;
-  createdAt: string;
+  name_en: string;
+  color: string;
+  icon: string;
+  category_key: string;
+  default_amount: number;
+  currency: CurrencyCode;
+  interval: 'week' | 'month' | 'quarter' | 'year';
+  url: string;
+  cancel_url: string;
+  sort: number;
+  created_at: string;
 }
 
-export interface MeterReading {
-  id: string;
-  meterId: string;
-  value: number;
-  date: string;
-  note?: string;
-  createdAt: string;
-}
-
-export interface Pet {
-  id: string;
-  name: string;
-  kind: string;
-  birthday?: string;
-  note?: string;
-  createdAt: string;
-}
-
-export type PetEventKind = 'feeding' | 'weight' | 'vaccine' | 'deworming' | 'visit' | 'custom';
-export interface PetEvent {
-  id: string;
-  petId: string;
-  kind: PetEventKind;
-  title: string;
-  date: string;
-  note?: string;
-  reminderDate?: string;
-  completed: boolean;
-  createdAt: string;
-}
-
-export interface LocalDatabase {
-  checklists: Checklist;
-  checklistItems: ChecklistItem;
-  checkTemplates: CheckTemplate;
-  checkRuns: CheckRun;
-  meters: Meter;
-  meterReadings: MeterReading;
-  pets: Pet;
-  petEvents: PetEvent;
-  preferences: { key: string; value: unknown };
-}
-
-export type StoreName = keyof LocalDatabase;
-
-export interface BackupV1 {
-  schemaVersion: 1;
-  exportedAt: string;
-  data: { [K in StoreName]: LocalDatabase[K][] };
+export interface AdminOverviewMetrics {
+  totalUsers: number;
+  activeSubscriptions: number;
+  totalTemplates: number;
+  remindersSentToday: number;
+  remindersFailedToday: number;
+  restrictedAccounts: number;
 }

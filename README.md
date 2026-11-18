@@ -1,57 +1,76 @@
-# 日常有序
+# Renewly
 
-手机优先的生活管理 H5/PWA，包含本机生活清单、出门检查、水电燃气抄表、宠物记录，以及可选的 Supabase 在线社区与管理后台。
+Cloud-synced, bilingual (`zh-CN` / `en`) subscription management & renewal reminder PWA built with React 19, TypeScript, Vite, Supabase, and Cloudflare Workers.
 
-## 本机运行
+## Features
 
-需要 Node.js 20 或更高版本。
+- **Cloud-First Subscription Workspace**: Sign in via email OTP or password (`supabase.auth`). All subscriptions, categories, payment methods, renewal events, and user preferences sync to Supabase PostgreSQL with Row Level Security (RLS).
+- **4-Tab Interface**:
+  - **Overview (`overview`)**: Monthly/yearly spending totals converted to your base currency (`CNY`, `USD`, `EUR`, `HKD`, `JPY`, `GBP`), active/trial counts, 7-day due count, monthly savings from paused/cancelled plans, category donut breakdown, and upcoming 30-day renewals.
+  - **Subscriptions (`subscriptions`)**: Search, status/category filtering, quick subscription templates (`subscription_templates`), custom billing cycles (`week` / `month` / `quarter` / `year` / `custom`), trial tracking, manual renewal/pause/resume/cancel actions, payment method tagging, and event history.
+  - **Calendar (`calendar`)**: Monthly renewal calendar highlighting recurring charge dates and daily renewal totals.
+  - **Settings (`settings`)**: Bilingual switcher (`zh-CN` / `en`), base currency preference with live exchange rate refresh (`refresh-exchange-rates`), light/dark/system theme, default reminder days, email reminder toggle, custom categories & payment methods manager, CSV import/export, and account security (profile, password, sign out, account deletion).
+- **Automated Reminders & Rollovers**: Scheduled `pg_cron` jobs automatically roll over due renewals (`renewly-rollover-due`), refresh Frankfurter FX rates (`renewly-refresh-rates`), and dispatch daily bilingual reminder emails (`renewly-send-reminders` via Resend).
+- **Admin Console**: Dedicated operator portal on `https://renewly-admin.yeecc.cn` with platform overview metrics, subscription template management, user moderation (suspend/restore/ban/unban), admin role governance, and moderation audit logs.
+
+## Production Domains
+
+- **Main App**: `https://renewly.yeecc.cn` (legacy alias `https://daily.yeecc.cn` preserved in `wrangler.toml`)
+- **Admin Console**: `https://renewly-admin.yeecc.cn` (legacy alias `https://admin.yeecc.cn`; `/#/admin` on main origins redirects to `https://renewly-admin.yeecc.cn/`)
+
+## Project Structure
+
+- `src/App.tsx` — Main application shell, cloud state sync, CSV import/export, routing, and toast notifications
+- `src/subscriptions.tsx` — Overview, Subscriptions, Calendar, subscription form/detail sheets, and category/payment-method modals
+- `src/account.tsx` — Auth screen (OTP / password sign-in & sign-up), profile, security/password setup, and account deletion
+- `src/i18n.ts` — Bilingual (`zh-CN` / `en`) dictionary and formatting helpers
+- `src/AdminPortal.tsx` & `src/AdminPanel.tsx` — Dedicated Admin login and 5-desk console (`overview`, `templates`, `users`, `admins`, `audit`)
+- `supabase/migrations/` — Postgres schema, RLS policies, RPCs, triggers, seeds, and `pg_cron` schedules
+- `supabase/functions/` — `admin-manage`, `admin-moderate`, `delete-account`, `send-renewal-reminders`, `refresh-exchange-rates`
+- `supabase/templates/` — Branded bilingual auth email templates (`confirmation.html`, `magic_link.html`, `recovery.html`)
+
+## Local Development
 
 ```bash
 npm install
-npm run dev
 ```
 
-没有 Supabase 配置时，四个个人模块照常使用；社区会显示配置提示，不会伪装为已联网。
+Create `.env.local` with your Supabase project credentials:
 
-## 启用社区
-
-1. 创建 Supabase 项目，并在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 中的迁移。已执行旧迁移的项目只补执行尚未应用的迁移，包括 `20261108125637_add_report_review_reason.sql`、`20261108132208_random_profile_names_password_status.sql`、`20261108141538_fix_legacy_admin_rpc_and_default_names.sql` 和 `20261115090418_community_engagement_summary.sql`。
-2. 复制 `.env.example` 为 `.env.local`，填入 Project URL 和 anon/publishable key。
-3. 部署 Edge Functions：`admin-moderate`、`admin-manage`、`delete-account` 与 `delete-content`。PowerShell 请在项目目录使用 `npx.cmd`（避免执行策略拦截 `npx.ps1`）：依次执行 `npx.cmd supabase login`、`npx.cmd supabase link --project-ref obyqyzgycivgituobdzm`，再对四个函数分别执行 `npx.cmd supabase functions deploy <function-name> --use-api`。本配置已启用 JWT 校验；`--use-api` 部署不需要本地 Docker。
-4. 在 Supabase Authentication 中启用邮箱验证并设置 Site URL / Redirect URLs，加入后台地址 `https://admin.yeecc.cn/`。在 Authentication → SMTP Settings 配置 Resend SMTP：`smtp.resend.com:465`、用户名 `resend`、发件人 `no-reply@yeecc.cn`，密码使用 Resend API key。然后运行 `npx.cmd supabase config push --yes` 推送 6 位、10 分钟验证码设置和邮件模板；SMTP 密码由 Auth SMTP 设置保管，不提交到 Git。
-5. 在 Cloudflare 将 `admin.yeecc.cn` 作为现有 `richangyouxu` Worker 的另一个 Custom Domain 绑定。
-6. 首次管理员先正常注册并验证邮箱，再由项目拥有者在 SQL Editor 执行：
-
-```sql
-with target as (
-  select u.id, lower(u.email) as email from auth.users u
-  where lower(u.email) = lower('你的管理员邮箱') and u.email_confirmed_at is not null
-)
-insert into public.admin_accounts(user_id, email, created_by)
-select id, email, id from target
-on conflict (user_id) do update set email = excluded.email;
-
-update public.profiles set role = 'admin'
-where id = (select id from auth.users where lower(email) = lower('你的管理员邮箱'));
+```env
+VITE_SUPABASE_URL=https://obyqyzgycivgituobdzm.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-确认只有可信任的账号被提升为管理员。不要把 service-role key 放入 `.env.local` 或前端环境变量。
-
-后台只在 `https://admin.yeecc.cn/` 提供邮箱密码登录和忘记密码，没有注册入口。管理员之后可在“管理员账号”页通过弹窗，按 6 位 UID 或邮箱添加已验证的现有账号为管理员。
-
-## 常用命令
+Start the dev server or build for production:
 
 ```bash
+npm run dev
 npm run build
 npm run preview
 ```
 
-## Cloudflare Worker 发布
+## Backend & Deployment Setup
 
-根目录 `wrangler.toml` 配置了 `daily.yeecc.cn` 与 `admin.yeecc.cn` 两个生产自定义域名，以及 `dist` 单页应用资源。
+### 1. Supabase Secrets
 
-连接 Cloudflare Workers Builds 后，生产分支设为 `main`、根目录设为 `/`，构建命令使用 `npm run build`，部署命令使用 `npx wrangler deploy`。Cloudflare 首次连接仓库时需要安装 GitHub App 并授权读取 `Yee-2/RiChangYouXu`；完成后推送 `main` 会发布两个域名共用的新前端。社区新前端依赖 `get_post_engagement` RPC；发布前先在 Supabase 应用对应迁移，再将前端变更合入或推送到生产分支。
+Automated reminder emails use [Resend](https://resend.com). Set `RESEND_API_KEY` as a Supabase Edge Function secret before expecting real email delivery (without `RESEND_API_KEY`, `send-renewal-reminders` safely returns `resendConfigured: false` and skips sending):
 
-手动发布时，在项目目录完成 `npx wrangler login`，然后执行 `npm run build` 和 `npx wrangler deploy`。
+```bash
+npx supabase secrets set RESEND_API_KEY=re_xxxxxxxxx
+```
 
-完整需求见 [项目需求规格说明书](docs/project-requirements.md)，部署细节见 [产品使用与部署指南](docs/product-guide.md)，接口见 [接口文档](docs/api.md)。隐私、服务协议和社区规范目前是运营草稿，公开上线前需要填写真实运营主体、联系方式和服务商信息。
+### 2. Deploy Edge Functions & Auth Config
+
+```bash
+npx supabase functions deploy admin-manage --use-api --yes
+npx supabase functions deploy admin-moderate --use-api --yes
+npx supabase functions deploy delete-account --use-api --yes
+npx supabase functions deploy send-renewal-reminders --use-api --yes
+npx supabase functions deploy refresh-exchange-rates --use-api --yes
+npx supabase config push --yes
+```
+
+### 3. Cloudflare Workers Deployment
+
+Cloudflare Workers Builds watches pushes to `main`, builds with `npm run build`, and deploys `dist/` using `wrangler.toml` (`name = "richangyouxu"`, `not_found_handling = "single-page-application"`).

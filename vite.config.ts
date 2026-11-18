@@ -10,19 +10,19 @@ export default defineConfig({
       includeAssets: ['icons/app-icon.svg'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
-        globIgnores: ['**/assets/community-*.js', '**/assets/supabase-*.js', '**/assets/AdminPortal-*.js', '**/assets/AdminPanel-*.js'],
+        globIgnores: ['**/assets/account-*.js', '**/assets/supabase-*.js', '**/assets/AdminPortal-*.js', '**/assets/AdminPanel-*.js'],
         runtimeCaching: [{
-          urlPattern: /\/assets\/(?:community|supabase|AdminPortal|AdminPanel)-[^/]+\.js$/,
+          urlPattern: /\/assets\/(?:account|supabase|AdminPortal|AdminPanel)-[^/]+\.js$/,
           handler: 'CacheFirst',
           options: { cacheName: 'lazy-route-chunks', expiration: { maxEntries: 12, maxAgeSeconds: 30 * 24 * 60 * 60 } }
         }]
       },
       manifest: {
-        name: '日常有序',
-        short_name: '日常有序',
-        description: '把生活小事安排得更从容',
-        theme_color: '#fff8ef',
-        background_color: '#fff8ef',
+        name: 'Renewly',
+        short_name: 'Renewly',
+        description: 'Cloud-synced subscription manager & renewal alerts',
+        theme_color: '#5B5BF0',
+        background_color: '#F7F7FB',
         display: 'standalone',
         start_url: '/',
         icons: [
