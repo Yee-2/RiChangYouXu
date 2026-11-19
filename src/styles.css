@@ -1067,6 +1067,38 @@ button:disabled { opacity: 0.52; cursor: not-allowed; }
   padding-top: 11px;
 }
 
+.ai-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ai-model-row > span {
+  flex: none;
+  font-weight: 600;
+}
+
+.ai-model-select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+
+.ai-model-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
 .ai-capture-textarea {
   width: 100%;
   border: 1px solid var(--line);

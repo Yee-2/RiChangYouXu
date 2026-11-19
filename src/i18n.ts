@@ -442,6 +442,7 @@ const zhDict = {
   aiConfidenceMedium: '请核对',
   aiConfidenceLow: '低置信度',
   aiRemoveAttachment: '移除附件',
+  aiModelLabel: '识别模型',
 };
 
 const enDict: Record<keyof typeof zhDict, string> = {
@@ -624,6 +625,7 @@ const enDict: Record<keyof typeof zhDict, string> = {
   aiConfidenceMedium: 'Review suggested',
   aiConfidenceLow: 'Low confidence',
   aiRemoveAttachment: 'Remove attachment',
+  aiModelLabel: 'AI Model',
 };
 
 export type DictKey = keyof typeof zhDict;

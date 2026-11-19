@@ -123,6 +123,12 @@ export interface AdminOverviewMetrics {
 }
 
 export type ExtractionConfidence = 'high' | 'medium' | 'low';
+export type GeminiModelId =
+  | 'gemini-3.5-flash-lite'
+  | 'gemini-3.8-flash'
+  | 'gemini-4-hydrogen'
+  | 'gemini-4-argon'
+  | 'gemini-4-carbon';
 
 export interface ParsedSubscriptionDraft {
   name: string;

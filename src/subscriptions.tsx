@@ -11,8 +11,11 @@ import {
 import { Icon } from './Icon';
 import {
   CAPTURE_ACCEPT,
+  GEMINI_MODEL_OPTIONS,
+  getSavedGeminiModel,
   parseSubscriptionWithGemini,
   prepareReceiptAttachment,
+  saveGeminiModel,
   type PreparedAttachment,
 } from './gemini';
 import { toUserMessage } from './userMessages';
@@ -41,6 +44,7 @@ import type {
   BillingInterval,
   Category,
   CurrencyCode,
+  GeminiModelId,
   Locale,
   ParsedSubscriptionDraft,
   ParseSubscriptionResult,
@@ -906,6 +910,7 @@ export function SubscriptionFormModal({
   const [busy, setBusy] = useState(false);
 
   const [aiExpanded, setAiExpanded] = useState(!initialSub && initialOpenSmartCapture);
+  const [aiModel, setAiModel] = useState<GeminiModelId>(() => getSavedGeminiModel());
   const [aiText, setAiText] = useState('');
   const [aiAttachment, setAiAttachment] = useState<PreparedAttachment | null>(null);
   const [aiParsing, setAiParsing] = useState(false);
@@ -1003,6 +1008,7 @@ export function SubscriptionFormModal({
     setAiError('');
     try {
       const result = await parseSubscriptionWithGemini({
+        model: aiModel,
         text: aiText,
         attachment: aiAttachment,
         locale,
@@ -1134,6 +1140,27 @@ export function SubscriptionFormModal({
                   <span>{t(locale, 'aiOfflineHint')}</span>
                 </div>
               )}
+
+              <label className="ai-model-row">
+                <span>{t(locale, 'aiModelLabel')}</span>
+                <select
+                  className="ai-model-select"
+                  value={aiModel}
+                  disabled={aiParsing}
+                  onChange={(e) => {
+                    const next = e.target.value as GeminiModelId;
+                    setAiModel(next);
+                    saveGeminiModel(next);
+                    setAiError('');
+                  }}
+                >
+                  {GEMINI_MODEL_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {locale === 'en' ? opt.en : opt.zh}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <textarea
                 className="ai-capture-textarea"

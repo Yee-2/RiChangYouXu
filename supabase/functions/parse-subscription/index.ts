@@ -7,7 +7,14 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const MODEL = 'gemini-4-hydrogen';
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const ALLOWED_MODELS = new Set([
+  'gemini-3.5-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-4-hydrogen',
+  'gemini-4-argon',
+  'gemini-4-carbon',
+]);
 const MAX_TEXT_CHARS = 8000;
 const MAX_BASE64_CHARS = 11_500_000;
 
@@ -70,6 +77,7 @@ interface RequestPaymentMethod {
 }
 
 interface ParseRequestBody {
+  model?: string;
   text?: string;
   file?: {
     data?: string;
@@ -258,6 +266,13 @@ Deno.serve(async (request) => {
 
   const locale: 'zh-CN' | 'en' = body.locale === 'en' ? 'en' : 'zh-CN';
   const baseCurrency: CurrencyCode = isCurrency(body.baseCurrency) ? body.baseCurrency : 'CNY';
+  const requestedModel = typeof body.model === 'string' ? body.model.trim() : '';
+  const envModel = Deno.env.get('GEMINI_MODEL')?.trim() ?? '';
+  const selectedModel = ALLOWED_MODELS.has(requestedModel)
+    ? requestedModel
+    : ALLOWED_MODELS.has(envModel)
+      ? envModel
+      : DEFAULT_MODEL;
   const today = isDateKey(body.today) ? body.today : shanghaiTodayKey();
   const rawText = typeof body.text === 'string' ? body.text.trim().slice(0, MAX_TEXT_CHARS) : '';
 
@@ -337,7 +352,7 @@ Deno.serve(async (request) => {
   try {
     const ai = new GoogleGenAI({ apiKey: geminiApiKey, apiVersion: 'v1beta' });
     const interaction = await ai.interactions.create({
-      model: MODEL,
+      model: selectedModel,
       store: false,
       system_instruction: systemInstruction,
       input: inputBlocks,
@@ -376,7 +391,7 @@ Deno.serve(async (request) => {
 
     return reply({
       ok: true,
-      model: MODEL,
+      model: selectedModel,
       found,
       summary,
       items,
@@ -384,9 +399,16 @@ Deno.serve(async (request) => {
   } catch (cause) {
     const status = extractUpstreamStatus(cause);
     console.error('parse-subscription failed', {
+      model: selectedModel,
       status,
       message: cause instanceof Error ? cause.message.slice(0, 400) : 'unknown_error',
     });
+    if (status === 402) {
+      return reply({ error: 'gemini_billing_required', model: selectedModel }, 402);
+    }
+    if (status === 401 || status === 403) {
+      return reply({ error: 'gemini_invalid_key' }, 502);
+    }
     if (status === 429) {
       return reply({ error: 'rate_limit_exceeded' }, 429);
     }

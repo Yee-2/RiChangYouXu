@@ -2,10 +2,73 @@ import { localTodayKey } from './i18n';
 import type {
   Category,
   CurrencyCode,
+  GeminiModelId,
   Locale,
   ParseSubscriptionResult,
   PaymentMethod,
 } from './types';
+
+export const DEFAULT_GEMINI_MODEL: GeminiModelId = 'gemini-3.5-flash-lite';
+
+export const GEMINI_MODEL_OPTIONS: Array<{
+  id: GeminiModelId;
+  zh: string;
+  en: string;
+  tier: 'free' | 'paid';
+}> = [
+  {
+    id: 'gemini-3.5-flash-lite',
+    zh: 'Gemini 3.5 Flash-Lite（免费 · 极速）',
+    en: 'Gemini 3.5 Flash-Lite (Free · Fast)',
+    tier: 'free',
+  },
+  {
+    id: 'gemini-3.8-flash',
+    zh: 'Gemini 3.8 Flash（免费 · 高精度）',
+    en: 'Gemini 3.8 Flash (Free · Accurate)',
+    tier: 'free',
+  },
+  {
+    id: 'gemini-4-hydrogen',
+    zh: 'Gemini 4 Hydrogen（付费 · 均衡）',
+    en: 'Gemini 4 Hydrogen (Paid · Balanced)',
+    tier: 'paid',
+  },
+  {
+    id: 'gemini-4-argon',
+    zh: 'Gemini 4 Argon（付费 · 推理）',
+    en: 'Gemini 4 Argon (Paid · Reasoning)',
+    tier: 'paid',
+  },
+  {
+    id: 'gemini-4-carbon',
+    zh: 'Gemini 4 Carbon（付费 · 旗舰）',
+    en: 'Gemini 4 Carbon (Paid · Frontier)',
+    tier: 'paid',
+  },
+];
+
+const MODEL_STORAGE_KEY = 'renewly_ai_model';
+
+export function getSavedGeminiModel(): GeminiModelId {
+  try {
+    const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (saved && GEMINI_MODEL_OPTIONS.some((item) => item.id === saved)) {
+      return saved as GeminiModelId;
+    }
+  } catch {
+    // ignore storage access errors
+  }
+  return DEFAULT_GEMINI_MODEL;
+}
+
+export function saveGeminiModel(model: GeminiModelId): void {
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, model);
+  } catch {
+    // ignore storage access errors
+  }
+}
 
 export const MAX_CAPTURE_FILE_BYTES = 8 * 1024 * 1024;
 export const CAPTURE_ACCEPT =
@@ -198,6 +261,7 @@ async function extractInvokeError(error: unknown): Promise<Error> {
 
     const status = typeof resp.status === 'number' ? resp.status : 0;
     if (status === 401) return new Error('unauthorized');
+    if (status === 402) return new Error('gemini_billing_required');
     if (status === 403) return new Error('account_restricted');
     if (status === 413) return new Error('file_too_large');
     if (status === 429) return new Error('rate_limit_exceeded');
@@ -213,6 +277,7 @@ async function extractInvokeError(error: unknown): Promise<Error> {
 }
 
 export async function parseSubscriptionWithGemini(params: {
+  model: GeminiModelId;
   text: string;
   attachment: PreparedAttachment | null;
   locale: Locale;
@@ -226,6 +291,7 @@ export async function parseSubscriptionWithGemini(params: {
   }
 
   const body = {
+    model: params.model,
     text: params.text.trim(),
     file: params.attachment
       ? {
@@ -262,7 +328,7 @@ export async function parseSubscriptionWithGemini(params: {
 
   const payload = (data ?? {}) as Partial<ParseSubscriptionResult>;
   return {
-    model: typeof payload.model === 'string' ? payload.model : 'gemini-4-hydrogen',
+    model: typeof payload.model === 'string' ? payload.model : params.model,
     found: Boolean(payload.found),
     summary: typeof payload.summary === 'string' ? payload.summary : '',
     items: Array.isArray(payload.items) ? payload.items : [],

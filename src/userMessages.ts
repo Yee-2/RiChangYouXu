@@ -147,6 +147,16 @@ export function toUserMessage(value: unknown, locale: Locale = 'zh-CN', fallback
       ? 'Gemini AI service is temporarily unavailable. Please try again shortly.'
       : 'Gemini AI 服务暂时不可用，请稍后重试。';
   }
+  if (/gemini_billing_required/.test(normalized)) {
+    return locale === 'en'
+      ? 'Selected Gemini model requires a paid billing plan (HTTP 402). Switch to a Free Tier model (Gemini 3.5 Flash-Lite / 3.8 Flash) or enable billing.'
+      : '当前所选模型需要 Gemini 付费账单（HTTP 402），请切换为免费层模型（Gemini 3.5 Flash-Lite / 3.8 Flash）或开通结算。';
+  }
+  if (/gemini_invalid_key/.test(normalized)) {
+    return locale === 'en'
+      ? 'Gemini API key is invalid or lacks permission. Check GEMINI_API_KEY in Supabase secrets.'
+      : 'Gemini API 密钥无效或权限不足，请检查 Supabase 中的 GEMINI_API_KEY 配置。';
+  }
   if (/file_read_failed/.test(normalized)) {
     return locale === 'en'
       ? 'Failed to read the attached file. Please select it again.'

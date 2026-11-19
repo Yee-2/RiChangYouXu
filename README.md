@@ -55,7 +55,7 @@ npm run preview
 
 ### 1. Supabase Secrets
 
-Automated reminder emails use [Resend](https://resend.com), and AI Smart Capture uses the [Gemini API](https://ai.google.dev/) (`gemini-4-hydrogen` via `@google/genai` Interactions API). Set `RESEND_API_KEY` and `GEMINI_API_KEY` as Supabase Edge Function secrets (without `RESEND_API_KEY`, `send-renewal-reminders` safely returns `resendConfigured: false`; without `GEMINI_API_KEY`, `parse-subscription` returns `503 gemini_not_configured`):
+Automated reminder emails use [Resend](https://resend.com), and AI Smart Capture uses the [Gemini API](https://ai.google.dev/) (defaults to Free Tier `gemini-3.5-flash-lite` via `@google/genai` Interactions API, with an in-app model selector and optional `GEMINI_MODEL` secret override). Set `RESEND_API_KEY` and `GEMINI_API_KEY` as Supabase Edge Function secrets (without `RESEND_API_KEY`, `send-renewal-reminders` safely returns `resendConfigured: false`; without `GEMINI_API_KEY`, `parse-subscription` returns `503 gemini_not_configured`):
 
 ```bash
 npx supabase secrets set RESEND_API_KEY=re_xxxxxxxxx GEMINI_API_KEY=AIzaSyxxxxxxxxx
