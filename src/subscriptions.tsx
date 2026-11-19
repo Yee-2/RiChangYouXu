@@ -1,5 +1,21 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { Icon } from './Icon';
+import {
+  CAPTURE_ACCEPT,
+  parseSubscriptionWithGemini,
+  prepareReceiptAttachment,
+  type PreparedAttachment,
+} from './gemini';
+import { toUserMessage } from './userMessages';
 import {
   BRAND_COLORS,
   BRAND_ICONS,
@@ -26,6 +42,8 @@ import type {
   Category,
   CurrencyCode,
   Locale,
+  ParsedSubscriptionDraft,
+  ParseSubscriptionResult,
   PaymentMethod,
   PaymentType,
   Subscription,
@@ -144,6 +162,7 @@ export function OverviewTab({
   ratesMap,
   canEdit,
   onAdd,
+  onSmartAdd,
   onGoSubscriptions,
   onSelectSubscription,
   onRenew,
@@ -156,6 +175,7 @@ export function OverviewTab({
   ratesMap: Map<string, number>;
   canEdit: boolean;
   onAdd: () => void;
+  onSmartAdd: () => void;
   onGoSubscriptions: () => void;
   onSelectSubscription: (sub: Subscription) => void;
   onRenew: (sub: Subscription) => void;
@@ -245,10 +265,16 @@ export function OverviewTab({
             </p>
           </div>
           {canEdit && (
-            <button type="button" className="hero-add-btn" onClick={onAdd}>
-              <Icon name="add" size={18} />
-              <span>{t(locale, 'addSubscription')}</span>
-            </button>
+            <div className="hero-actions">
+              <button type="button" className="hero-ai-btn" onClick={onSmartAdd}>
+                <Icon name="sparkles" size={16} />
+                <span>{t(locale, 'aiScanBtn')}</span>
+              </button>
+              <button type="button" className="hero-add-btn" onClick={onAdd}>
+                <Icon name="add" size={18} />
+                <span>{t(locale, 'addSubscription')}</span>
+              </button>
+            </div>
           )}
         </div>
       </section>
@@ -413,6 +439,7 @@ export function SubscriptionsTab({
   ratesMap,
   canEdit,
   onAdd,
+  onSmartAdd,
   onSelectSubscription,
   onRenew,
 }: {
@@ -424,6 +451,7 @@ export function SubscriptionsTab({
   ratesMap: Map<string, number>;
   canEdit: boolean;
   onAdd: () => void;
+  onSmartAdd: () => void;
   onSelectSubscription: (sub: Subscription) => void;
   onRenew: (sub: Subscription) => void;
 }) {
@@ -486,9 +514,15 @@ export function SubscriptionsTab({
       <div className="page-head-row">
         <h1>{t(locale, 'mySubscriptions')}</h1>
         {canEdit && (
-          <button type="button" className="round-add-btn" onClick={onAdd} aria-label={t(locale, 'addSubscription')}>
-            <Icon name="add" size={22} />
-          </button>
+          <div className="page-head-actions">
+            <button type="button" className="soft-button compact ai-pill-btn" onClick={onSmartAdd}>
+              <Icon name="sparkles" size={15} />
+              <span>{t(locale, 'aiScanBtn')}</span>
+            </button>
+            <button type="button" className="round-add-btn" onClick={onAdd} aria-label={t(locale, 'addSubscription')}>
+              <Icon name="add" size={22} />
+            </button>
+          </div>
         )}
       </div>
 
@@ -814,6 +848,9 @@ export function SubscriptionFormModal({
   categories,
   paymentMethods,
   templates,
+  online,
+  initialOpenSmartCapture = false,
+  onNotify,
   onClose,
   onSave,
 }: {
@@ -823,6 +860,9 @@ export function SubscriptionFormModal({
   categories: Category[];
   paymentMethods: PaymentMethod[];
   templates: SubscriptionTemplate[];
+  online: boolean;
+  initialOpenSmartCapture?: boolean;
+  onNotify?: (msg: unknown) => void;
   onClose: () => void;
   onSave: (payload: {
     name: string;
@@ -864,6 +904,124 @@ export function SubscriptionFormModal({
   const [cancelUrl, setCancelUrl] = useState(initialSub?.cancel_url ?? '');
   const [note, setNote] = useState(initialSub?.note ?? '');
   const [busy, setBusy] = useState(false);
+
+  const [aiExpanded, setAiExpanded] = useState(!initialSub && initialOpenSmartCapture);
+  const [aiText, setAiText] = useState('');
+  const [aiAttachment, setAiAttachment] = useState<PreparedAttachment | null>(null);
+  const [aiParsing, setAiParsing] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiResult, setAiResult] = useState<ParseSubscriptionResult | null>(null);
+  const [aiSelectedIdx, setAiSelectedIdx] = useState(0);
+  const aiFileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentRef = useRef<PreparedAttachment | null>(null);
+
+  useEffect(() => {
+    attachmentRef.current = aiAttachment;
+  }, [aiAttachment]);
+
+  useEffect(() => {
+    return () => {
+      if (attachmentRef.current?.previewUrl) {
+        URL.revokeObjectURL(attachmentRef.current.previewUrl);
+      }
+    };
+  }, []);
+
+  const clearAttachment = () => {
+    setAiAttachment((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  };
+
+  const attachFile = async (file: File) => {
+    setAiError('');
+    try {
+      const prepared = await prepareReceiptAttachment(file);
+      setAiAttachment((prev) => {
+        if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+        return prepared;
+      });
+    } catch (cause) {
+      setAiError(toUserMessage(cause, locale));
+    }
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    void attachFile(file);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          event.preventDefault();
+          void attachFile(file);
+          break;
+        }
+      }
+    }
+  };
+
+  const applyParsedDraft = (draft: ParsedSubscriptionDraft) => {
+    setName(draft.name);
+    setAmount(String(draft.amount));
+    setCurrency(draft.currency);
+    setInterval(draft.interval);
+    setIntervalCount(String(draft.interval_count));
+    setStartDate(draft.start_date);
+    setColor(draft.color);
+    setIcon(draft.icon);
+    setIsTrial(draft.is_trial);
+    setTrialEndDate(draft.trial_end_date ?? todayKey);
+    setAutoRenew(draft.auto_renew);
+    setUrl(draft.url);
+    setCancelUrl(draft.cancel_url);
+    setNote(draft.note);
+    if (draft.category_id && categories.some((c) => c.id === draft.category_id)) {
+      setCategoryId(draft.category_id);
+    }
+    if (draft.payment_method_id && paymentMethods.some((p) => p.id === draft.payment_method_id)) {
+      setPaymentMethodId(draft.payment_method_id);
+    }
+  };
+
+  const runAiExtract = async () => {
+    if (!online || aiParsing) return;
+    if (!aiText.trim() && !aiAttachment) {
+      setAiError(toUserMessage('input_required', locale));
+      return;
+    }
+
+    setAiParsing(true);
+    setAiError('');
+    try {
+      const result = await parseSubscriptionWithGemini({
+        text: aiText,
+        attachment: aiAttachment,
+        locale,
+        baseCurrency: settings.base_currency,
+        categories,
+        paymentMethods,
+      });
+      setAiResult(result);
+      setAiSelectedIdx(0);
+      if (result.items.length > 0) {
+        applyParsedDraft(result.items[0]);
+        onNotify?.(t(locale, 'aiFilledHint'));
+      }
+    } catch (cause) {
+      setAiError(toUserMessage(cause, locale));
+    } finally {
+      setAiParsing(false);
+    }
+  };
 
   const applyTemplate = (tpl: SubscriptionTemplate) => {
     setName(templateDisplayName(tpl, locale));
@@ -938,8 +1096,158 @@ export function SubscriptionFormModal({
     { id: 'custom', label: t(locale, 'cycleCustom') },
   ];
 
+  const activeDraft = aiResult?.items[aiSelectedIdx] ?? null;
+  const confidenceBadge = activeDraft
+    ? activeDraft.confidence === 'high'
+      ? { tone: 'mint', label: t(locale, 'aiConfidenceHigh') }
+      : activeDraft.confidence === 'low'
+        ? { tone: 'coral', label: t(locale, 'aiConfidenceLow') }
+        : { tone: 'amber', label: t(locale, 'aiConfidenceMedium') }
+    : null;
+
   return (
     <SheetModal title={initialSub ? t(locale, 'editSubscription') : t(locale, 'addSubscription')} onClose={onClose}>
+      {!initialSub && (
+        <section className={`ai-capture-card ${aiExpanded ? 'is-open' : ''}`} aria-label={t(locale, 'aiCaptureTitle')}>
+          <button
+            type="button"
+            className="ai-capture-toggle"
+            aria-expanded={aiExpanded}
+            onClick={() => setAiExpanded((open) => !open)}
+          >
+            <span className="ai-capture-icon">
+              <Icon name="sparkles" size={17} />
+            </span>
+            <span className="ai-capture-head-copy">
+              <b>{t(locale, 'aiCaptureTitle')}</b>
+              <small>{t(locale, 'aiCaptureSubtitle')}</small>
+            </span>
+            <span className="ai-badge">Gemini</span>
+            <Icon name="chevron_right" size={16} className={`ai-chevron ${aiExpanded ? 'open' : ''}`} />
+          </button>
+
+          {aiExpanded && (
+            <div className="ai-capture-body">
+              {!online && (
+                <div className="ai-inline-error" role="status">
+                  <Icon name="wifi_off" size={15} />
+                  <span>{t(locale, 'aiOfflineHint')}</span>
+                </div>
+              )}
+
+              <textarea
+                className="ai-capture-textarea"
+                rows={3}
+                maxLength={8000}
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                onPaste={handlePaste}
+                placeholder={t(locale, 'aiCapturePlaceholder')}
+                aria-label={t(locale, 'aiCaptureTitle')}
+              />
+
+              {aiAttachment && (
+                <div className="ai-attachment-chip">
+                  {aiAttachment.previewUrl ? (
+                    <img src={aiAttachment.previewUrl} alt={aiAttachment.name} className="ai-attachment-thumb" />
+                  ) : (
+                    <span className="ai-pdf-badge">
+                      <Icon name="article" size={16} />
+                    </span>
+                  )}
+                  <span className="ai-attachment-meta">
+                    <b>{aiAttachment.name}</b>
+                    <small>{Math.max(1, Math.round(aiAttachment.size / 1024))} KB</small>
+                  </span>
+                  <button
+                    type="button"
+                    className="icon-button small"
+                    onClick={clearAttachment}
+                    aria-label={t(locale, 'aiRemoveAttachment')}
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              )}
+
+              <div className="ai-capture-controls">
+                <button
+                  type="button"
+                  className="soft-button compact"
+                  disabled={aiParsing}
+                  onClick={() => aiFileInputRef.current?.click()}
+                >
+                  <Icon name="upload_file" size={15} />
+                  <span>{t(locale, 'aiAttachFile')}</span>
+                </button>
+                <input
+                  ref={aiFileInputRef}
+                  type="file"
+                  accept={CAPTURE_ACCEPT}
+                  className="visually-hidden-file"
+                  onChange={handleFileChange}
+                />
+
+                <button
+                  type="button"
+                  className="primary-button compact ai-extract-btn"
+                  disabled={!online || aiParsing || (!aiText.trim() && !aiAttachment)}
+                  onClick={() => void runAiExtract()}
+                >
+                  <Icon name={aiParsing ? 'progress_activity' : 'sparkles'} size={15} className={aiParsing ? 'spin' : ''} />
+                  <span>{aiParsing ? t(locale, 'aiExtracting') : t(locale, 'aiExtractAction')}</span>
+                </button>
+              </div>
+
+              {aiError && (
+                <div className="ai-inline-error" role="alert">
+                  <Icon name="error" size={15} />
+                  <span>{aiError}</span>
+                </div>
+              )}
+
+              {aiResult && (
+                <div className={`ai-result-banner ${aiResult.items.length === 0 ? 'is-empty' : ''}`} role="status">
+                  <div className="ai-result-top">
+                    <Icon name={aiResult.items.length > 0 ? 'check_circle' : 'info'} size={16} />
+                    <span>
+                      {aiResult.items.length > 0
+                        ? (aiResult.summary || t(locale, 'aiFilledHint'))
+                        : (aiResult.summary || t(locale, 'aiNothingFound'))}
+                    </span>
+                    {confidenceBadge && (
+                      <span className={`badge-pill ${confidenceBadge.tone}`}>{confidenceBadge.label}</span>
+                    )}
+                  </div>
+
+                  {aiResult.items.length > 1 && (
+                    <div className="ai-detected-wrap">
+                      <small>{t(locale, 'aiMultipleFound')}</small>
+                      <div className="ai-detected-pills">
+                        {aiResult.items.map((item, idx) => (
+                          <button
+                            type="button"
+                            key={`${item.name}-${idx}`}
+                            className={`ai-detected-pill ${idx === aiSelectedIdx ? 'active' : ''}`}
+                            onClick={() => {
+                              setAiSelectedIdx(idx);
+                              applyParsedDraft(item);
+                            }}
+                          >
+                            <span>{item.name}</span>
+                            <b className="tabular">{formatMoney(item.amount, item.currency, locale)}</b>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {!initialSub && templates.length > 0 && (
         <div className="template-strip-wrap">
           <small className="field-label">{t(locale, 'quickTemplates')}</small>
@@ -969,7 +1277,7 @@ export function SubscriptionFormModal({
         <label className="field">
           <span>{t(locale, 'serviceName')}</span>
           <input
-            autoFocus
+            autoFocus={!initialOpenSmartCapture}
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={80}

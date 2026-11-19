@@ -121,3 +121,32 @@ export interface AdminOverviewMetrics {
   remindersFailedToday: number;
   restrictedAccounts: number;
 }
+
+export type ExtractionConfidence = 'high' | 'medium' | 'low';
+
+export interface ParsedSubscriptionDraft {
+  name: string;
+  amount: number;
+  currency: CurrencyCode;
+  interval: BillingInterval;
+  interval_count: number;
+  start_date: string;
+  is_trial: boolean;
+  trial_end_date: string | null;
+  auto_renew: boolean;
+  category_id: string | null;
+  payment_method_id: string | null;
+  color: string;
+  icon: string;
+  url: string;
+  cancel_url: string;
+  note: string;
+  confidence: ExtractionConfidence;
+}
+
+export interface ParseSubscriptionResult {
+  model: string;
+  found: boolean;
+  summary: string;
+  items: ParsedSubscriptionDraft[];
+}

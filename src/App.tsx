@@ -111,6 +111,7 @@ function RenewlyApp() {
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([]);
 
   const [showForm, setShowForm] = useState(false);
+  const [openSmartCapture, setOpenSmartCapture] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
   const [renewingSub, setRenewingSub] = useState<Subscription | null>(null);
   const [detailSub, setDetailSub] = useState<Subscription | null>(null);
@@ -395,6 +396,7 @@ function RenewlyApp() {
         setToast(t(locale, 'subSaved'));
       }
       setShowForm(false);
+      setOpenSmartCapture(false);
       setEditingSub(null);
       await loadCloudData(session.user.id);
     } catch (cause) {
@@ -823,7 +825,8 @@ function RenewlyApp() {
             paymentMethods={paymentMethods}
             ratesMap={ratesMap}
             canEdit={canEdit}
-            onAdd={() => { setEditingSub(null); setShowForm(true); }}
+            onAdd={() => { setEditingSub(null); setOpenSmartCapture(false); setShowForm(true); }}
+            onSmartAdd={() => { setEditingSub(null); setOpenSmartCapture(true); setShowForm(true); }}
             onGoSubscriptions={() => setNav('subscriptions')}
             onSelectSubscription={(sub) => void openDetail(sub)}
             onRenew={(sub) => setRenewingSub(sub)}
@@ -837,7 +840,8 @@ function RenewlyApp() {
             paymentMethods={paymentMethods}
             ratesMap={ratesMap}
             canEdit={canEdit}
-            onAdd={() => { setEditingSub(null); setShowForm(true); }}
+            onAdd={() => { setEditingSub(null); setOpenSmartCapture(false); setShowForm(true); }}
+            onSmartAdd={() => { setEditingSub(null); setOpenSmartCapture(true); setShowForm(true); }}
             onSelectSubscription={(sub) => void openDetail(sub)}
             onRenew={(sub) => setRenewingSub(sub)}
           />
@@ -1072,7 +1076,10 @@ function RenewlyApp() {
           categories={categories}
           paymentMethods={paymentMethods}
           templates={templates}
-          onClose={() => { setShowForm(false); setEditingSub(null); }}
+          online={online}
+          initialOpenSmartCapture={openSmartCapture}
+          onNotify={notify}
+          onClose={() => { setShowForm(false); setOpenSmartCapture(false); setEditingSub(null); }}
           onSave={saveSubscription}
         />
       )}
@@ -1093,6 +1100,7 @@ function RenewlyApp() {
             const target = detailSub;
             setDetailSub(null);
             setEditingSub(target);
+            setOpenSmartCapture(false);
             setShowForm(true);
           }}
           onRenew={() => setRenewingSub(detailSub)}

@@ -427,6 +427,21 @@ const zhDict = {
   landingFeature3: '6 种主流货币实时换算',
   signInTitle: '登录或创建 Renewly 账号',
   restrictedBanner: '当前账号处于受限状态，仅可查看已有订阅记录，无法新增或修改数据。',
+  aiScanBtn: 'AI 识别',
+  aiCaptureTitle: 'AI 智能识别账单',
+  aiCaptureSubtitle: '粘贴扣费短信/邮件，或上传截图 / PDF 自动填充表单',
+  aiCapturePlaceholder: '例如：粘贴 App Store / 支付宝 / 微信 / 邮箱扣费通知，或输入“ChatGPT Plus 每月 20 美元，每月 12 号扣款”…（支持直接粘贴截图）',
+  aiAttachFile: '上传截图 / PDF',
+  aiExtractAction: '识别并自动填表',
+  aiExtracting: 'Gemini 正在识别账单…',
+  aiFilledHint: '已自动填充表单，请核对后保存',
+  aiMultipleFound: '识别到多项订阅，点击切换填充：',
+  aiNothingFound: '未检测到明确的订阅信息，可补充更多文本或清晰截图后重试。',
+  aiOfflineHint: '离线状态下暂不可用 AI 识别，联网后即可使用。',
+  aiConfidenceHigh: '高置信度',
+  aiConfidenceMedium: '请核对',
+  aiConfidenceLow: '低置信度',
+  aiRemoveAttachment: '移除附件',
 };
 
 const enDict: Record<keyof typeof zhDict, string> = {
@@ -594,6 +609,21 @@ const enDict: Record<keyof typeof zhDict, string> = {
   landingFeature3: '6 currencies with live FX',
   signInTitle: 'Sign in or create a Renewly account',
   restrictedBanner: 'Your account is restricted. You can view existing subscriptions, while edits are disabled.',
+  aiScanBtn: 'AI Scan',
+  aiCaptureTitle: 'AI Smart Capture',
+  aiCaptureSubtitle: 'Paste billing SMS/email or upload a receipt image / PDF to auto-fill',
+  aiCapturePlaceholder: 'Paste an App Store, Stripe, or email receipt, or type e.g. "ChatGPT Plus $20/mo billed on the 12th"… (or paste a screenshot)',
+  aiAttachFile: 'Attach Image / PDF',
+  aiExtractAction: 'Extract & Auto-Fill',
+  aiExtracting: 'Extracting with Gemini…',
+  aiFilledHint: 'Form auto-filled — review details before saving',
+  aiMultipleFound: 'Multiple subscriptions detected — select one to fill:',
+  aiNothingFound: 'No clear subscription details found. Try adding more text or a clearer receipt.',
+  aiOfflineHint: 'AI capture requires an internet connection.',
+  aiConfidenceHigh: 'High confidence',
+  aiConfidenceMedium: 'Review suggested',
+  aiConfidenceLow: 'Low confidence',
+  aiRemoveAttachment: 'Remove attachment',
 };
 
 export type DictKey = keyof typeof zhDict;

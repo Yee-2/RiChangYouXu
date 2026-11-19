@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.refresh-exchange-rates]
 verify_jwt = false
 
+[functions.parse-subscription]
+verify_jwt = true
+
 [auth]
 additional_redirect_urls = ["https://renewly.yeecc.cn/", "https://renewly.yeecc.cn", "https://renewly-admin.yeecc.cn/", "https://renewly-admin.yeecc.cn", "https://daily.yeecc.cn/", "https://daily.yeecc.cn", "https://admin.yeecc.cn/", "http://localhost:5173/admin", "http://127.0.0.1:5173/admin"]
 site_url = "https://renewly.yeecc.cn"

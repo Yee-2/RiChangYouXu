@@ -117,6 +117,36 @@ export function toUserMessage(value: unknown, locale: Locale = 'zh-CN', fallback
   if (/origin_not_allowed/.test(normalized)) {
     return locale === 'en' ? 'Origin is not allowed for admin endpoint.' : '当前访问来源未被允许调用后台管理接口。';
   }
+  if (/gemini_not_configured/.test(normalized)) {
+    return locale === 'en'
+      ? 'AI Smart Capture is not configured yet (missing GEMINI_API_KEY secret on Supabase).'
+      : 'AI 智能识别尚未配置（服务端缺少 GEMINI_API_KEY 密钥）。';
+  }
+  if (/input_required/.test(normalized)) {
+    return locale === 'en'
+      ? 'Please paste billing text or attach a receipt screenshot / PDF.'
+      : '请先输入账单文本，或上传账单截图 / PDF。';
+  }
+  if (/unsupported_file_type/.test(normalized)) {
+    return locale === 'en'
+      ? 'Only PNG, JPG, WEBP, HEIC, GIF images or PDF files are supported.'
+      : '仅支持 PNG、JPG、WEBP、HEIC、GIF 图片或 PDF 文件。';
+  }
+  if (/file_too_large/.test(normalized)) {
+    return locale === 'en'
+      ? 'File is too large. Please upload an image or PDF under 8 MB.'
+      : '文件过大，请上传 8 MB 以内的图片或 PDF。';
+  }
+  if (/gemini_parse_failed/.test(normalized)) {
+    return locale === 'en'
+      ? 'Could not parse structured subscription details. Please try clearer text or image.'
+      : '未能解析出结构化订阅信息，请更换更清晰的文本或截图重试。';
+  }
+  if (/gemini_upstream_error/.test(normalized)) {
+    return locale === 'en'
+      ? 'Gemini AI service is temporarily unavailable. Please try again shortly.'
+      : 'Gemini AI 服务暂时不可用，请稍后重试。';
+  }
   if (/\bunauthorized\b/.test(normalized)) {
     return locale === 'en' ? 'Session expired. Please sign in again.' : '登录状态已失效，请重新登录。';
   }
