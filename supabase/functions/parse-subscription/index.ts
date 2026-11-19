@@ -335,7 +335,7 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey, apiVersion: 'v1beta' });
     const interaction = await ai.interactions.create({
       model: MODEL,
       store: false,
@@ -385,7 +385,7 @@ Deno.serve(async (request) => {
     const status = extractUpstreamStatus(cause);
     console.error('parse-subscription failed', {
       status,
-      message: cause instanceof Error ? cause.message.slice(0, 180) : 'unknown_error',
+      message: cause instanceof Error ? cause.message.slice(0, 400) : 'unknown_error',
     });
     if (status === 429) {
       return reply({ error: 'rate_limit_exceeded' }, 429);
