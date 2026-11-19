@@ -24,7 +24,7 @@ export function toUserMessage(value: unknown, locale: Locale = 'zh-CN', fallback
   const normalized = `${code} ${message}`.trim().toLowerCase();
 
   if (!normalized) return defaultFallback;
-  if (/load failed|failed to fetch|networkerror|network request failed|fetch failed|network is unreachable|err_name_not_resolved|err_connection_(?:reset|refused)|timed? ?out|timeout|aborterror/.test(normalized)) {
+  if (/load failed|failed to fetch|failed to send a request to the edge function|edge_network_error|networkerror|network request failed|fetch failed|network is unreachable|err_name_not_resolved|err_connection_(?:reset|refused)|timed? ?out|timeout|aborterror/.test(normalized)) {
     return locale === 'en'
       ? 'Network request failed. Check your connection and try again.'
       : '网络连接失败，请检查网络后重试；如果持续出现，请联系管理员检查服务状态。';
@@ -146,6 +146,26 @@ export function toUserMessage(value: unknown, locale: Locale = 'zh-CN', fallback
     return locale === 'en'
       ? 'Gemini AI service is temporarily unavailable. Please try again shortly.'
       : 'Gemini AI 服务暂时不可用，请稍后重试。';
+  }
+  if (/file_read_failed/.test(normalized)) {
+    return locale === 'en'
+      ? 'Failed to read the attached file. Please select it again.'
+      : '读取附件失败，请重新选择图片或 PDF 后重试。';
+  }
+  if (/edge_relay_error/.test(normalized)) {
+    return locale === 'en'
+      ? 'Edge Function relay error. Please try again shortly.'
+      : '云函数节点暂时异常，请稍后重试。';
+  }
+  if (/edge_timeout/.test(normalized)) {
+    return locale === 'en'
+      ? 'Recognition timed out. Try a smaller file or try again shortly.'
+      : '账单识别超时，请换用更小的文件或稍后重试。';
+  }
+  if (/edge function returned a non-2xx status code/.test(normalized)) {
+    return locale === 'en'
+      ? 'Cloud recognition endpoint returned an error. Please try again.'
+      : '云端识别接口返回异常，请稍后重试。';
   }
   if (/\bunauthorized\b/.test(normalized)) {
     return locale === 'en' ? 'Session expired. Please sign in again.' : '登录状态已失效，请重新登录。';

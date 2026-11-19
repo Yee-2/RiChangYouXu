@@ -343,7 +343,7 @@ Deno.serve(async (request) => {
       input: inputBlocks,
       generation_config: {
         thinking_level: 'low',
-        max_output_tokens: 1400,
+        max_output_tokens: 8192,
       },
       response_format: {
         type: 'text',

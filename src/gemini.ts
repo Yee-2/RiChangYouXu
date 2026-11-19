@@ -21,7 +21,13 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
 ]);
 
-const COMPRESSIBLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const COMPRESSIBLE_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
 
 const EXTENSION_TO_MIME: Record<string, string> = {
   pdf: 'application/pdf',
@@ -51,20 +57,31 @@ function resolveMimeType(file: File): string {
   return EXTENSION_TO_MIME[ext] ?? '';
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('file_read_failed'));
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        reject(new Error('file_read_failed'));
-        return;
-      }
-      const comma = reader.result.indexOf(',');
-      resolve(comma >= 0 ? reader.result.slice(comma + 1) : reader.result);
-    };
-    reader.readAsDataURL(blob);
-  });
+async function blobToBase64(blob: Blob): Promise<string> {
+  try {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    const chunks: string[] = [];
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      chunks.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
+    }
+    return btoa(chunks.join(''));
+  } catch {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('file_read_failed'));
+      reader.onload = () => {
+        if (typeof reader.result !== 'string') {
+          reject(new Error('file_read_failed'));
+          return;
+        }
+        const comma = reader.result.indexOf(',');
+        resolve(comma >= 0 ? reader.result.slice(comma + 1) : reader.result);
+      };
+      reader.readAsDataURL(blob);
+    });
+  }
 }
 
 async function compressLargeImage(file: File): Promise<{ blob: Blob; mimeType: string }> {
@@ -77,7 +94,7 @@ async function compressLargeImage(file: File): Promise<{ blob: Blob; mimeType: s
       el.src = tempUrl;
     });
 
-    const maxEdge = 1600;
+    const maxEdge = 1400;
     const largest = Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height);
     const scale = largest > maxEdge ? maxEdge / largest : 1;
     const width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
@@ -91,7 +108,7 @@ async function compressLargeImage(file: File): Promise<{ blob: Blob; mimeType: s
 
     ctx.drawImage(img, 0, 0, width, height);
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((out) => resolve(out), 'image/jpeg', 0.85),
+      canvas.toBlob((out) => resolve(out), 'image/jpeg', 0.82),
     );
 
     if (blob && blob.size < file.size) {
@@ -117,7 +134,7 @@ export async function prepareReceiptAttachment(file: File): Promise<PreparedAtta
   let uploadBlob: Blob = file;
   let uploadMime = resolvedMime;
 
-  if (COMPRESSIBLE_IMAGE_TYPES.has(resolvedMime) && file.size > 1_500_000) {
+  if (COMPRESSIBLE_IMAGE_TYPES.has(resolvedMime) && file.size > 600_000) {
     const compressed = await compressLargeImage(file);
     uploadBlob = compressed.blob;
     uploadMime = compressed.mimeType;
@@ -136,22 +153,58 @@ export async function prepareReceiptAttachment(file: File): Promise<PreparedAtta
 }
 
 async function extractInvokeError(error: unknown): Promise<Error> {
-  const errObj = error && typeof error === 'object' ? (error as { message?: unknown; context?: unknown }) : undefined;
+  console.error('[Renewly AI Capture]', error);
+
+  const errObj =
+    error && typeof error === 'object'
+      ? (error as { name?: unknown; message?: unknown; context?: unknown })
+      : undefined;
+
+  if (
+    errObj?.name === 'FunctionsFetchError' ||
+    (typeof errObj?.message === 'string' &&
+      errObj.message.includes('Failed to send a request to the Edge Function'))
+  ) {
+    return new Error('edge_network_error');
+  }
+
+  if (errObj?.name === 'FunctionsRelayError') {
+    return new Error('edge_relay_error');
+  }
+
   const context = errObj?.context;
   if (context && typeof context === 'object') {
-    const resp = context as { clone?: () => Response; json?: () => Promise<unknown> };
+    const resp = context as { status?: unknown; clone?: () => Response; json?: () => Promise<unknown> };
     try {
       const target = typeof resp.clone === 'function' ? resp.clone() : resp;
       if (typeof target.json === 'function') {
-        const payload = (await target.json()) as { error?: unknown } | null;
-        if (payload && typeof payload.error === 'string' && payload.error.trim()) {
-          return new Error(payload.error.trim());
+        const payload = (await target.json()) as {
+          error?: unknown;
+          code?: unknown;
+          message?: unknown;
+          msg?: unknown;
+        } | null;
+        if (payload && typeof payload === 'object') {
+          for (const candidate of [payload.error, payload.code, payload.message, payload.msg]) {
+            if (typeof candidate === 'string' && candidate.trim()) {
+              return new Error(candidate.trim());
+            }
+          }
         }
       }
     } catch {
-      // fall through to original error message
+      // fall through to HTTP status mapping
     }
+
+    const status = typeof resp.status === 'number' ? resp.status : 0;
+    if (status === 401) return new Error('unauthorized');
+    if (status === 403) return new Error('account_restricted');
+    if (status === 413) return new Error('file_too_large');
+    if (status === 429) return new Error('rate_limit_exceeded');
+    if (status === 504) return new Error('edge_timeout');
+    if (status >= 500) return new Error('gemini_upstream_error');
   }
+
   if (error instanceof Error) return error;
   if (typeof errObj?.message === 'string' && errObj.message.trim()) {
     return new Error(errObj.message.trim());
